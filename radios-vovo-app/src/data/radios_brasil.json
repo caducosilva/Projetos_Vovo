@@ -1,0 +1,342 @@
+[
+  {
+    "name": "Rádio Transcontinental FM 104.7",
+    "state": "SP",
+    "city": "Mogi das Cruzes / SP",
+    "genre": "Samba, Pagode & Sucessos",
+    "url": "https://stm1.srvif.com:7018/stream",
+    "logo": "https://radios.voxcdn.com/img/logos/transcontinental_fm_mogi.png",
+    "freq": "104.7 FM",
+    "destaque": true
+  },
+  {
+    "name": "Metropolitana FM 98.5",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Pop & Sucessos",
+    "url": "https://stream.metropolitanafm.com.br/live",
+    "logo": "https://metropolitanafm.com.br/logo.png",
+    "freq": "98.5 FM",
+    "destaque": true
+  },
+  {
+    "name": "Alpha FM 101.7",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Flashback & MPB",
+    "url": "https://playerservices.streamtheworld.com/api/livestream-redirect/RADIO_ALPHAFMAAC.aac",
+    "logo": "https://alphafm.com.br/logo.png",
+    "freq": "101.7 FM",
+    "destaque": true
+  },
+  {
+    "name": "Nativa FM 95.3",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Sertanejo & Romântico",
+    "url": "https://evpp.mm.uol.com.br/rad-nativafm/nativafm/playlist.m3u8",
+    "logo": "https://nativafm.com.br/logo.png",
+    "freq": "95.3 FM",
+    "destaque": true
+  },
+  {
+    "name": "BandNews FM São Paulo 96.9",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Notícias & Jornalismo",
+    "url": "https://evpp.mm.uol.com.br/rad-bandnewsfm/bandnewsfm_sp/playlist.m3u8",
+    "logo": "https://bandnewsfm.band.uol.com.br/logo.png",
+    "freq": "96.9 FM",
+    "destaque": true
+  },
+  {
+    "name": "Jovem Pan FM 100.9",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Música & Notícias",
+    "url": "https://streaming.jovempan.com.br/hls/jpfm.m3u8",
+    "logo": "https://jovempan.com.br/logo.png",
+    "freq": "100.9 FM",
+    "destaque": true
+  },
+  {
+    "name": "Jovem Pan News 620 AM",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Notícias & Política",
+    "url": "https://streaming.jovempan.com.br/hls/jpam.m3u8",
+    "logo": "https://jovempan.com.br/logo.png",
+    "freq": "620 AM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Bandeirantes 840 AM / 90.9 FM",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Notícias & Esportes",
+    "url": "https://evpp.mm.uol.com.br/rad-bandeirantes/bandeirantes/playlist.m3u8",
+    "logo": "https://radiobandeirantes.band.uol.com.br/logo.png",
+    "freq": "90.9 FM",
+    "destaque": true
+  },
+  {
+    "name": "Gazeta FM 88.1",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Popular & Sertanejo",
+    "url": "https://servidor31-1.brlogic.com:8014/live",
+    "logo": "https://gazetafm.com.br/logo.png",
+    "freq": "88.1 FM",
+    "destaque": true
+  },
+  {
+    "name": "Antena 1 94.7 FM",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Música Suave & Internacional",
+    "url": "https://stream.antena1.com.br/stream",
+    "logo": "https://antena1.com.br/logo.png",
+    "freq": "94.7 FM",
+    "destaque": true
+  },
+  {
+    "name": "Novabrasil FM 89.7",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "MPB Brasileira",
+    "url": "https://playerservices.streamtheworld.com/api/livestream-redirect/NOVABRASIL_SPAAC.aac",
+    "logo": "https://novabrasilfm.com.br/logo.png",
+    "freq": "89.7 FM",
+    "destaque": true
+  },
+  {
+    "name": "89 FM A Rádio Rock",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Rock Nacional & Internacional",
+    "url": "https://playerservices.streamtheworld.com/api/livestream-redirect/RADIO_89FMAAC.aac",
+    "logo": "https://radiorock.com.br/logo.png",
+    "freq": "89.1 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Aparecida FM 104.3",
+    "state": "SP",
+    "city": "Aparecida do Norte",
+    "genre": "Católica & Terço",
+    "url": "https://icecast.redeaparecida.com.br/radioaparecida",
+    "logo": "https://a12.com/logo.png",
+    "freq": "104.3 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Canção Nova 89.1 FM",
+    "state": "SP",
+    "city": "Cachoeira Paulista",
+    "genre": "Católica & Oração",
+    "url": "https://stream.cancaonova.com:8000/radiocn",
+    "logo": "https://cancaonova.com/logo.png",
+    "freq": "89.1 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Evangelizar (Padre Manzotti)",
+    "state": "PR",
+    "city": "Curitiba",
+    "genre": "Católica & Missa",
+    "url": "https://stream.padrereginaldomanzotti.org.br/live",
+    "logo": "https://evangelizarepreciso.com.br/logo.png",
+    "freq": "1060 AM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio 9 de Julho (Arquidiocese SP)",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Católica & Mensagem de Fé",
+    "url": "https://servidor39-3.brlogic.com:8246/live",
+    "logo": "https://radio9dejulho.com.br/logo.png",
+    "freq": "1600 AM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Imaculada Conceição 1490 AM",
+    "state": "SP",
+    "city": "São Bernardo do Campo",
+    "genre": "Católica & Terço Mariano",
+    "url": "https://stream.miliciadaimaculada.org.br:8000/stream",
+    "logo": "https://miliciadaimaculada.org.br/logo.png",
+    "freq": "1490 AM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Melodia FM 97.5",
+    "state": "RJ",
+    "city": "Rio de Janeiro",
+    "genre": "Gospel & Louvor",
+    "url": "https://stream.melodia.com.br:8000/stream",
+    "logo": "https://melodia.com.br/logo.png",
+    "freq": "97.5 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Sertaneja Raiz",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Moda de Viola & Raiz",
+    "url": "https://stream.zeno.fm/46gq527e02zuv",
+    "logo": "https://sertanejaraiz.com/logo.png",
+    "freq": "Web Rádio",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Viola Viva",
+    "state": "MG",
+    "city": "Minas Gerais",
+    "genre": "Sertanejo Antigo & Viola",
+    "url": "https://stream.zeno.fm/f97b5e4077quv",
+    "logo": "https://violaviva.com.br/logo.png",
+    "freq": "Web Rádio",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Positiva Sertanejo",
+    "state": "GO",
+    "city": "Goiânia",
+    "genre": "Sertanejo & Clássicos",
+    "url": "https://stm1.painelcast.com:7100/stream",
+    "logo": "https://positivafm.com.br/logo.png",
+    "freq": "98.9 FM",
+    "destaque": true
+  },
+  {
+    "name": "Super Rádio Tupi 96.5 FM",
+    "state": "RJ",
+    "city": "Rio de Janeiro",
+    "genre": "Popular, Futebol & Notícias",
+    "url": "https://stream.tupi.fm/aovivo",
+    "logo": "https://tupi.fm/logo.png",
+    "freq": "96.5 FM",
+    "destaque": true
+  },
+  {
+    "name": "JB FM 99.9",
+    "state": "RJ",
+    "city": "Rio de Janeiro",
+    "genre": "MPB & Sucessos",
+    "url": "https://playerservices.streamtheworld.com/api/livestream-redirect/JBFMAAC.aac",
+    "logo": "https://jbfm.com.br/logo.png",
+    "freq": "99.9 FM",
+    "destaque": true
+  },
+  {
+    "name": "FM O Dia 100.5",
+    "state": "RJ",
+    "city": "Rio de Janeiro",
+    "genre": "Pagode & Ritmos",
+    "url": "https://stream.fmodia.com.br/stream",
+    "logo": "https://fmodia.com.br/logo.png",
+    "freq": "100.5 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Itatiaia 95.7 FM / 610 AM",
+    "state": "MG",
+    "city": "Belo Horizonte",
+    "genre": "Notícias & Futebol",
+    "url": "https://itatiaia.live.cdn.bitgravity.com/itatiaia/live/live.m3u8",
+    "logo": "https://itatiaia.com.br/logo.png",
+    "freq": "95.7 FM",
+    "destaque": true
+  },
+  {
+    "name": "Alvorada FM 94.9",
+    "state": "MG",
+    "city": "Belo Horizonte",
+    "genre": "Música Adulto Contemporâneo",
+    "url": "https://streaming.alvoradafm.com.br/live",
+    "logo": "https://alvoradafm.com.br/logo.png",
+    "freq": "94.9 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Sociedade da Bahia 102.5 FM",
+    "state": "BA",
+    "city": "Salvador",
+    "genre": "Notícias & Axé",
+    "url": "https://stream.sociedadedabahia.com.br/live",
+    "logo": "https://sociedadedabahia.com.br/logo.png",
+    "freq": "102.5 FM",
+    "destaque": true
+  },
+  {
+    "name": "Piatã FM 94.3",
+    "state": "BA",
+    "city": "Salvador",
+    "genre": "Sucessos da Bahia",
+    "url": "https://stream.piatafm.com.br/live",
+    "logo": "https://piatafm.com.br/logo.png",
+    "freq": "94.3 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Jornal Recife 90.3 FM",
+    "state": "PE",
+    "city": "Recife",
+    "genre": "Notícias & Regional",
+    "url": "https://stream.radiojornal.com.br/live",
+    "logo": "https://radiojornal.com.br/logo.png",
+    "freq": "90.3 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Gaúcha 93.7 FM",
+    "state": "RS",
+    "city": "Porto Alegre",
+    "genre": "Notícias & Futebol",
+    "url": "https://playerservices.streamtheworld.com/api/livestream-redirect/GAUCHA_FMAAC.aac",
+    "logo": "https://gauchazh.clicrbs.com.br/logo.png",
+    "freq": "93.7 FM",
+    "destaque": true
+  },
+  {
+    "name": "Massa FM Curitiba 97.7",
+    "state": "PR",
+    "city": "Curitiba",
+    "genre": "Sertanejo & Popular",
+    "url": "https://stream.massafm.com.br/curitiba",
+    "logo": "https://massafm.com.br/logo.png",
+    "freq": "97.7 FM",
+    "destaque": true
+  },
+  {
+    "name": "Rádio Banda B 79.3 FM",
+    "state": "PR",
+    "city": "Curitiba",
+    "genre": "Popular & Notícias",
+    "url": "https://stream.bandab.com.br/live",
+    "logo": "https://bandab.com.br/logo.png",
+    "freq": "79.3 FM",
+    "destaque": true
+  },
+  {
+    "name": "Saudade FM 99.7 (Santos & Litoral SP)",
+    "state": "SP",
+    "city": "Santos / SP",
+    "genre": "Clássicos dos Anos 60, 70 e 80",
+    "url": "https://stream.saudadefm.com.br/stream",
+    "logo": "https://saudadefm.com.br/logo.png",
+    "freq": "99.7 FM",
+    "destaque": true
+  },
+  {
+    "name": "Flashback Brasil Anos 80",
+    "state": "SP",
+    "city": "São Paulo",
+    "genre": "Flashback & Melhores Épocas",
+    "url": "https://stream.zeno.fm/0e4t1k35a0zuv",
+    "logo": "https://flashbackbrasil.com/logo.png",
+    "freq": "Web Rádio",
+    "destaque": true
+  }
+]

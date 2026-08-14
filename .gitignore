@@ -1,0 +1,52 @@
+# Dependencias e builds
+node_modules/
+dist/
+dist-ssr/
+build/
+.gradle/
+*.tsbuildinfo
+
+# Android / Capacitor gerados
+local.properties
+android/app/src/main/assets/public/
+android/app/build/
+android/build/
+android/capacitor-cordova-android-plugins/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Python
+__pycache__/
+*.pyc
+
+# Streams das cameras (gerado em tempo real)
+stream/
+*.m3u8
+*.ts
+
+# Logs e temporarios
+*.log
+*.tmp
+err.txt
+
+# Editor / sistema
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.suo
+*.sw?
+
+# APKs prontos (binarios de terceiros, centenas de MB)
+APKs_Prontos/
+
+# Visualizador de cameras vive no repositorio privado CameraLocal
+cameras-vovo/
+
+# Capturas de tela de depuracao
+*.png
+!**/src/assets/**
+!**/public/**

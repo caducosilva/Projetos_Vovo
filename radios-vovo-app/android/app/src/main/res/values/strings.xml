@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Radios da Vovo</string>
+    <string name="title_activity_main">Radios da Vovo</string>
+    <string name="package_name">com.vovoradios.app</string>
+    <string name="custom_url_scheme">com.vovoradios.app</string>
+</resources>
