@@ -182,6 +182,19 @@ rodando o `servidor.py`. Desligou o computador, o canal da câmera para. Câmera
 sem sinal continua aparecendo na grade de propósito, com um aviso ao tocar, em
 vez de sumir e a vovó achar que o app perdeu a câmera.
 
+Para não depender de alguém lembrar de abrir o servidor, existe a tarefa
+agendada **`VovoCameras`**, que roda `cameras-vovo/iniciar_cameras.ps1` no logon
+do Windows. O script sobe o `servidor.py` sem janela e só sobe se a porta 8790
+estiver livre: o `servidor.py` usa `allow_reuse_address`, então dois servidores
+conseguiriam subir ao mesmo tempo e as câmeras ficariam aparecendo e sumindo.
+
+```powershell
+Get-ScheduledTask -TaskName VovoCameras     # conferir
+Start-ScheduledTask -TaskName VovoCameras   # subir agora
+```
+
+O log fica em `cameras-vovo/iniciar_cameras.log`.
+
 ### Atualização pelo próprio app
 
 O app não vive na Play Store. O caminho normal para atualizar seria abrir o
@@ -243,7 +256,8 @@ boa parte deles de terceiros, e o lugar deles é a aba de releases.
 | "Nenhuma TV encontrada" com a TV ligada | celular e TV em redes diferentes, ou a TV está com DLNA desligado | Confira o Wi-Fi dos dois e procure por "DLNA" ou "compartilhamento de mídia" no menu da TV |
 | A TV recebe o canal mas fica parada | a TV não abre HLS | Sem solução pelo app; assista pelo celular ou escolha um canal que não seja `.m3u8` |
 | Atualização baixa e não instala | falta liberar "instalar apps desconhecidos" | O próprio app abre a tela certa; ligue a chave e volte |
-| Categoria "Câmeras de Casa" vazia | endereço errado, ou `servidor.py` parado | Ajustes → Câmeras de casa → conferir o IP e tocar em Testar |
+| Categoria "Câmeras de Casa" vazia | endereço errado, ou `servidor.py` parado | Ajustes → Câmeras de casa → conferir o IP e tocar em Testar. No computador: `Start-ScheduledTask -TaskName VovoCameras` |
+| Câmera aparece e some sozinha | dois `servidor.py` brigando pela porta 8790 | Suba sempre pelo `iniciar_cameras.ps1`, que tem a trava de instância única |
 | A câmera some depois de um tempo | o IP do computador mudou (DHCP) | Reserve um IP fixo para ele no roteador |
 | Uma câmera aparece e a outra não | o ffmpeg daquela câmera não está gerando stream | Confira o RTSP dela em `servidor.py`; `/stream/<id>/index.m3u8` deve responder 200 |
 
