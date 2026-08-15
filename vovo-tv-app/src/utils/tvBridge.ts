@@ -1,6 +1,15 @@
 import { registerPlugin, Capacitor } from '@capacitor/core';
 
+/** Espaco das barras do sistema, em pixels de CSS. */
+export interface Insets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
 export interface TvBridgePlugin {
+  getInsets(): Promise<Insets>;
   setBrightness(options: { value: number }): Promise<void>;
   resetBrightness(): Promise<void>;
   setVolume(options: { value: number }): Promise<{ value: number }>;
@@ -30,6 +39,7 @@ async function safe<T>(fn: () => Promise<T>): Promise<T | null> {
 }
 
 export const tv = {
+  getInsets: () => safe(() => TvBridge.getInsets()),
   setBrightness: (value: number) => safe(() => TvBridge.setBrightness({ value })),
   resetBrightness: () => safe(() => TvBridge.resetBrightness()),
   setVolume: (value: number) => safe(() => TvBridge.setVolume({ value })),

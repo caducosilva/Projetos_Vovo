@@ -161,6 +161,27 @@ da maior parte dos canais de IPTV. Nesses casos a TV recebe o comando e fica
 parada. O app detecta o formato e avisa antes de tentar, em vez de deixar a
 pessoa achando que quebrou.
 
+### Câmeras de casa dentro do app de TV
+
+As câmeras aparecem como canais, na categoria "Câmeras de Casa", para a vovó não
+precisar aprender um segundo aplicativo. O caminho é
+`câmera → RTSP → ffmpeg → HLS → o mesmo player dos canais`.
+
+O RTSP não toca em WebView, então quem converte é o `servidor.py` do
+repositório privado das câmeras. Ele publica `/api/cameras` com id e nome de
+cada uma, e o app monta os canais a partir daí. **A senha da câmera nunca sai
+do servidor**: o app só recebe id, nome e a URL do HLS já convertido.
+
+O endereço do computador fica em Ajustes, gravado no aparelho, e não no código:
+o repositório é público e não deve carregar o mapa da rede da casa. O app
+reconsulta a lista a cada minuto, então se o computador estiver desligado na
+hora que a vovó abrir o app, as câmeras aparecem sozinhas quando ele voltar.
+
+**Dependência real:** isso só funciona com o computador ligado, na mesma rede,
+rodando o `servidor.py`. Desligou o computador, o canal da câmera para. Câmera
+sem sinal continua aparecendo na grade de propósito, com um aviso ao tocar, em
+vez de sumir e a vovó achar que o app perdeu a câmera.
+
 ### Atualização pelo próprio app
 
 O app não vive na Play Store. O caminho normal para atualizar seria abrir o
@@ -222,6 +243,9 @@ boa parte deles de terceiros, e o lugar deles é a aba de releases.
 | "Nenhuma TV encontrada" com a TV ligada | celular e TV em redes diferentes, ou a TV está com DLNA desligado | Confira o Wi-Fi dos dois e procure por "DLNA" ou "compartilhamento de mídia" no menu da TV |
 | A TV recebe o canal mas fica parada | a TV não abre HLS | Sem solução pelo app; assista pelo celular ou escolha um canal que não seja `.m3u8` |
 | Atualização baixa e não instala | falta liberar "instalar apps desconhecidos" | O próprio app abre a tela certa; ligue a chave e volte |
+| Categoria "Câmeras de Casa" vazia | endereço errado, ou `servidor.py` parado | Ajustes → Câmeras de casa → conferir o IP e tocar em Testar |
+| A câmera some depois de um tempo | o IP do computador mudou (DHCP) | Reserve um IP fixo para ele no roteador |
+| Uma câmera aparece e a outra não | o ffmpeg daquela câmera não está gerando stream | Confira o RTSP dela em `servidor.py`; `/stream/<id>/index.m3u8` deve responder 200 |
 
 ---
 

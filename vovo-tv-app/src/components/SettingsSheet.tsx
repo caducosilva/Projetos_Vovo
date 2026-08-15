@@ -1,8 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Upload, Link2, Activity, Square, CheckCircle2, AlertCircle, Download } from 'lucide-react';
+import {
+  Upload,
+  Link2,
+  Activity,
+  Square,
+  CheckCircle2,
+  AlertCircle,
+  Download,
+  Video
+} from 'lucide-react';
 import { parseM3UContent } from '../utils/m3uParser';
 import { checkForUpdate, installedVersionName, type AvailableUpdate } from '../utils/updater';
 import { isNative } from '../utils/tvBridge';
+import {
+  servidorCameras,
+  definirServidorCameras,
+  testarServidorCameras
+} from '../utils/cameras';
 import type { Channel } from '../types';
 import { Sheet } from './Sheet';
 
@@ -17,6 +31,8 @@ interface SettingsSheetProps {
   onStartProbe: () => void;
   onStopProbe: () => void;
   onUpdateFound: (update: AvailableUpdate) => void;
+  /** Avisa o App para recarregar a lista de cameras logo apos trocar o endereco. */
+  onCamerasChanged: () => void;
 }
 
 type Aviso = { tipo: 'ok' | 'erro'; texto: string } | null;
@@ -38,18 +54,48 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
   healthCounts,
   onStartProbe,
   onStopProbe,
-  onUpdateFound
+  onUpdateFound,
+  onCamerasChanged
 }) => {
   const [url, setUrl] = useState('');
   const [carregando, setCarregando] = useState(false);
   const [aviso, setAviso] = useState<Aviso>(null);
   const [versao, setVersao] = useState('...');
   const [procurandoUpdate, setProcurandoUpdate] = useState(false);
+  const [enderecoCameras, setEnderecoCameras] = useState('');
+  const [testandoCameras, setTestandoCameras] = useState(false);
   const inputArquivo = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isOpen) installedVersionName().then(setVersao);
+    if (!isOpen) return;
+    installedVersionName().then(setVersao);
+    setEnderecoCameras(servidorCameras());
   }, [isOpen]);
+
+  /** Só grava o endereço depois que ele responde, para não salvar um IP errado. */
+  const salvarCameras = async () => {
+    setTestandoCameras(true);
+    setAviso(null);
+    try {
+      const quantas = await testarServidorCameras(enderecoCameras);
+      definirServidorCameras(enderecoCameras);
+      onCamerasChanged();
+      setAviso({
+        tipo: 'ok',
+        texto:
+          quantas > 0
+            ? `${quantas} câmera(s) encontrada(s). Já aparecem em "Câmeras de Casa".`
+            : 'Servidor achado, mas sem nenhuma câmera ligada.'
+      });
+    } catch (error) {
+      setAviso({
+        tipo: 'erro',
+        texto: error instanceof Error ? error.message : 'Não consegui falar com o servidor.'
+      });
+    } finally {
+      setTestandoCameras(false);
+    }
+  };
 
   const aplicar = (canais: Channel[], origem: string) => {
     if (canais.length === 0) {
@@ -180,6 +226,34 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
               aria-label="Baixar lista deste endereço"
             >
               <Link2 className="h-6 w-6" strokeWidth={2.5} />
+            </button>
+          </div>
+        </section>
+
+        <section>
+          <h3 className="mb-1 text-xl font-black text-tinta-100">Câmeras de casa</h3>
+          <p className="mb-3 text-base leading-snug text-tinta-300">
+            Endereço do computador que transmite as câmeras. Elas aparecem como canais na
+            categoria "Câmeras de Casa". O computador precisa estar ligado com o{' '}
+            <code className="rounded bg-noite-900 px-1 text-sm">servidor.py</code> rodando.
+          </p>
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              inputMode="url"
+              value={enderecoCameras}
+              onChange={(e) => setEnderecoCameras(e.target.value)}
+              placeholder="192.168.0.25"
+              className="h-toque min-w-0 flex-1 rounded-2xl border-2 border-noite-500 bg-noite-700 px-4 text-base font-bold text-tinta-100 placeholder-tinta-500 outline-none focus:border-sol-400"
+            />
+            <button
+              onClick={salvarCameras}
+              disabled={testandoCameras}
+              className="flex h-toque shrink-0 items-center gap-2 rounded-2xl bg-sol-400 px-4 text-lg font-black text-noite-900 transition active:scale-95 disabled:opacity-50"
+            >
+              <Video className="h-6 w-6" strokeWidth={2.5} />
+              {testandoCameras ? '...' : 'Testar'}
             </button>
           </div>
         </section>

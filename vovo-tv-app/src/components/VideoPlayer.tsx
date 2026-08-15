@@ -22,6 +22,7 @@ import {
 import type { Channel, ChannelWithHealth } from '../types';
 import { tv, isNative } from '../utils/tvBridge';
 import { dlna } from '../utils/dlna';
+import { ehCanalDeCamera } from '../utils/cameras';
 import { cleanChannelName, isRadioChannel } from '../utils/channelName';
 import { CastSheet } from './CastSheet';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -252,7 +253,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       encerrado = true;
       window.clearTimeout(relogio);
       setCarregando(false);
-      setErro('Este canal não está no ar agora.');
+      // A camera falha por um motivo so, e "canal fora do ar" mandaria a vovo
+      // procurar outro canal em vez de avisar que o computador esta desligado.
+      setErro(
+        ehCanalDeCamera(channel)
+          ? 'A câmera não está aparecendo agora.'
+          : 'Este canal não está no ar agora.'
+      );
       onPlaybackFail?.(endereco, detalhe);
     };
 
@@ -634,7 +641,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <Tv className="h-11 w-11" strokeWidth={2.5} />
           </div>
           <p className="text-2xl font-black text-white">{erro}</p>
-          <p className="max-w-xs text-lg text-tinta-300">Escolha outro canal ou tente de novo.</p>
+          <p className="max-w-xs text-lg text-tinta-300">
+            {ehCanalDeCamera(channel)
+              ? 'Veja se o computador de casa está ligado.'
+              : 'Escolha outro canal ou tente de novo.'}
+          </p>
           <div className="flex flex-col gap-2.5 sm:flex-row">
             <button
               onClick={(e) => {

@@ -16,6 +16,7 @@ import {
 import type { HealthMap, ProbeResult } from './utils/health';
 import { checkForUpdate, type AvailableUpdate } from './utils/updater';
 import { dedupe, migrarFavoritos } from './utils/channelList';
+import { buscarCanaisDeCamera, ehCanalDeCamera } from './utils/cameras';
 import { Header } from './components/Header';
 import { CategoryBar } from './components/CategoryBar';
 import { CategorySheet } from './components/CategorySheet';
@@ -195,6 +196,36 @@ export default function App() {
     });
   }, []);
 
+  /**
+   * Cameras de casa.
+   *
+   * A lista vem do servidor que roda no computador, entao ela e recarregada de
+   * tempos em tempos: se o computador estava desligado quando o app abriu, os
+   * canais aparecem sozinhos assim que ele voltar, sem a vovo fazer nada.
+   */
+  const carregarCameras = useCallback(async (sinal?: AbortSignal) => {
+    const cameras = await buscarCanaisDeCamera(sinal);
+    setChannels((anterior) => {
+      const semCameras = anterior.filter((c) => !ehCanalDeCamera(c));
+      const iguais =
+        cameras.length === anterior.length - semCameras.length &&
+        cameras.every((cam) => anterior.some((c) => c.url === cam.url));
+      // Sem mudanca real nao troca o estado, senao a grade repinta a cada minuto
+      if (iguais) return anterior;
+      return dedupe([...cameras, ...semCameras]);
+    });
+  }, []);
+
+  useEffect(() => {
+    const controle = new AbortController();
+    void carregarCameras(controle.signal);
+    const relogio = window.setInterval(() => void carregarCameras(), 60_000);
+    return () => {
+      controle.abort();
+      window.clearInterval(relogio);
+    };
+  }, [carregarCameras]);
+
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
 
   const isFavorite = useCallback(
@@ -214,9 +245,11 @@ export default function App() {
     setChannels((anterior) => {
       const unicos = dedupe([...novos, ...anterior]);
       try {
+        // Camera fica de fora: ela e montada a partir do servidor a cada
+        // abertura, e gravar aqui deixaria camera antiga presa na lista.
         localStorage.setItem(
           'vovo_tv_custom_channels',
-          JSON.stringify(unicos.filter((c) => c.isCustom))
+          JSON.stringify(unicos.filter((c) => c.isCustom && !ehCanalDeCamera(c)))
         );
       } catch {
         /* sem espaco: os canais valem nesta sessao */
@@ -291,7 +324,10 @@ export default function App() {
         );
       }
 
-      if (canal.health === 'dead' && !isFavorite(canal)) return false;
+      // Camera nunca some da grade. Se o computador estiver desligado ela seria
+      // marcada como morta e sumiria, e a vovo nao teria como saber que existe
+      // nem quando voltasse. Melhor mostrar e explicar ao tocar.
+      if (canal.health === 'dead' && !isFavorite(canal) && !ehCanalDeCamera(canal)) return false;
 
       if (selectedCategory === 'todos') return true;
       if (selectedCategory === 'brasil') return (canal.country || 'br').toLowerCase() === 'br';
@@ -443,6 +479,7 @@ export default function App() {
         onStartProbe={handleStartProbe}
         onStopProbe={stopProbe}
         onUpdateFound={setAtualizacao}
+        onCamerasChanged={() => void carregarCameras()}
       />
 
       <UpdatePrompt update={atualizacao} onDismiss={() => setAtualizacao(null)} />

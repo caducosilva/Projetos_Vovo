@@ -21,6 +21,7 @@ export interface ChannelWithHealth extends Channel {
 }
 
 export type CategoryKey =
+  | 'cameras'
   | 'abertos'
   | 'radios-todas'
   | 'radios-sp'

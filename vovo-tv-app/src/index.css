@@ -81,16 +81,23 @@
     scrollbar-width: none;
   }
 
-  /* Respeita entalhe e barra de gestos, em pe e deitado */
+  /**
+   * Respeita barra de status, barra de gestos e recorte da camera.
+   *
+   * A medida vem do nativo pelas variaveis --inset-*, porque no Android o
+   * env(safe-area-inset-top) so cobre o recorte da camera e ignora a barra de
+   * status. O env() fica de reserva para iOS e navegador; o max() garante uma
+   * folga minima quando nenhum dos dois tem valor.
+   */
   .area-segura-topo {
-    padding-top: max(0.75rem, env(safe-area-inset-top));
+    padding-top: max(0.75rem, var(--inset-topo, env(safe-area-inset-top, 0px)));
   }
   .area-segura-base {
-    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    padding-bottom: max(0.75rem, var(--inset-base, env(safe-area-inset-bottom, 0px)));
   }
   .area-segura-lados {
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
+    padding-left: var(--inset-esq, env(safe-area-inset-left, 0px));
+    padding-right: var(--inset-dir, env(safe-area-inset-right, 0px));
   }
 
   /* Duas linhas e reticencias, para nome de canal comprido nao empurrar o card */

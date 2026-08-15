@@ -10,6 +10,12 @@ import android.provider.Settings;
 import android.view.View;
 import android.view.WindowManager;
 
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
+
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -25,6 +31,42 @@ public class TvBridge extends Plugin {
 
     private AudioManager audio() {
         return (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+    }
+
+    /**
+     * Espaco ocupado pela barra de status, pela barra de gestos e pelo recorte
+     * da camera, em pixels de CSS.
+     *
+     * Existe porque no Android o env(safe-area-inset-top) do CSS so enxerga o
+     * recorte da camera, nunca a barra de status. Do Android 15 em diante o app
+     * desenha atras dela, e sem esta medida o botao Voltar do player nascia por
+     * cima do relogio.
+     */
+    @PluginMethod
+    public void getInsets(PluginCall call) {
+        JSObject ret = new JSObject();
+        final View raiz = getBridge().getWebView();
+        WindowInsetsCompat janela = raiz != null ? ViewCompat.getRootWindowInsets(raiz) : null;
+
+        if (janela == null) {
+            ret.put("top", 0);
+            ret.put("bottom", 0);
+            ret.put("left", 0);
+            ret.put("right", 0);
+            call.resolve(ret);
+            return;
+        }
+
+        Insets barras = janela.getInsets(
+            WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+        float densidade = getContext().getResources().getDisplayMetrics().density;
+        if (densidade <= 0) densidade = 1f;
+
+        ret.put("top", Math.round(barras.top / densidade));
+        ret.put("bottom", Math.round(barras.bottom / densidade));
+        ret.put("left", Math.round(barras.left / densidade));
+        ret.put("right", Math.round(barras.right / densidade));
+        call.resolve(ret);
     }
 
     /** Brilho da janela do app (0..1). Nao precisa de permissao WRITE_SETTINGS. */
@@ -150,18 +192,18 @@ public class TvBridge extends Plugin {
         final boolean on = call.getBoolean("value", true);
         final Activity activity = getActivity();
         activity.runOnUiThread(() -> {
-            View decor = activity.getWindow().getDecorView();
+            // setSystemUiVisibility esta depreciado e o Android 15 em diante
+            // simplesmente ignora, entao a vovo deitava o celular e as barras
+            // continuavam por cima do video.
+            WindowInsetsControllerCompat controle = WindowCompat.getInsetsController(
+                activity.getWindow(), activity.getWindow().getDecorView());
+
             if (on) {
-                decor.setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                );
+                controle.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controle.hide(WindowInsetsCompat.Type.systemBars());
             } else {
-                decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+                controle.show(WindowInsetsCompat.Type.systemBars());
             }
         });
         call.resolve();

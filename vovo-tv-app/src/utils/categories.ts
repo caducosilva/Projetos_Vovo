@@ -1,6 +1,8 @@
 import type { Channel, CategoryInfo, CategoryKey } from '../types';
+import { ehCanalDeCamera } from './cameras';
 
 export const CATEGORIES: CategoryInfo[] = [
+  { key: 'cameras', label: '🏠 Câmeras de Casa', icon: 'Video' },
   { key: 'favoritos', label: '⭐ Favoritos', icon: 'Star' },
   { key: 'abertos', label: '📺 Canais Abertos TV', icon: 'Tv' },
   { key: 'radios-todas', label: '📻 Todas as Rádios (Brasil)', icon: 'Radio' },
@@ -26,6 +28,10 @@ export const CATEGORIES: CategoryInfo[] = [
 ];
 
 export function getChannelCategory(channel: Channel): CategoryKey[] {
+  // Camera de casa fica so na propria categoria: cair em "notícias" por causa
+  // de uma palavra no nome deixaria a vovo achando a camera no meio da TV.
+  if (ehCanalDeCamera(channel)) return ['cameras'];
+
   const name = (channel.name || '').toLowerCase();
   const group = (channel.group || '').toLowerCase();
   const id = (channel.id || '').toLowerCase();

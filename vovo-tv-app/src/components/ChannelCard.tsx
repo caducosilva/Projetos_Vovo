@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Play, Star, Radio } from 'lucide-react';
+import { Play, Star, Radio, Video } from 'lucide-react';
 import type { ChannelWithHealth } from '../types';
+import { ehCanalDeCamera } from '../utils/cameras';
 import {
   cleanChannelName,
   channelInitials,
@@ -28,6 +29,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = React.memo(
     const [logoQuebrou, setLogoQuebrou] = useState(false);
 
     const radio = isRadioChannel(channel);
+    const camera = ehCanalDeCamera(channel);
     const nome = cleanChannelName(channel.name);
     const temLogo = Boolean(channel.logo) && channel.logo.startsWith('http') && !logoQuebrou;
 
@@ -55,6 +57,15 @@ export const ChannelCard: React.FC<ChannelCardProps> = React.memo(
                   }
                 }}
               />
+            ) : camera ? (
+              // Camera de casa nao tem logo e nao deve parecer emissora: o
+              // desenho da camera e o que a vovo reconhece de longe.
+              <span
+                className="flex h-full w-full items-center justify-center bg-noite-600 text-vivo-400"
+                aria-hidden="true"
+              >
+                <Video className="h-14 w-14" strokeWidth={2} />
+              </span>
             ) : (
               <span
                 className="flex h-full w-full items-center justify-center text-4xl font-black tracking-tight text-white sm:text-5xl"
@@ -71,8 +82,14 @@ export const ChannelCard: React.FC<ChannelCardProps> = React.memo(
           </h3>
 
           <span className="flex h-toque items-center justify-center gap-2 rounded-2xl bg-sol-400 text-xl font-black text-noite-900">
-            {radio ? <Radio className="h-6 w-6" strokeWidth={2.5} /> : <Play className="h-6 w-6 fill-current" />}
-            {radio ? 'Ouvir' : 'Assistir'}
+            {radio ? (
+              <Radio className="h-6 w-6" strokeWidth={2.5} />
+            ) : camera ? (
+              <Video className="h-6 w-6" strokeWidth={2.5} />
+            ) : (
+              <Play className="h-6 w-6 fill-current" />
+            )}
+            {radio ? 'Ouvir' : camera ? 'Ver' : 'Assistir'}
           </span>
         </button>
 
