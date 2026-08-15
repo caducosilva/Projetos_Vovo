@@ -31,13 +31,19 @@ TV ao vivo com mais de 750 canais abertos e regionais do Brasil e da América
 Latina, entre eles TV Diário de Mogi das Cruzes, Globo SP, SBT, Record, Band,
 Cultura, RedeTV, Aparecida, Canção Nova e os canais de notícias.
 
+- **Espelhar na TV pelo Wi-Fi (DLNA).** Um toque em "TV" procura as televisões
+  da casa e manda o canal para lá. Sem cabo, sem Chromecast, sem conta.
+- **Atualização pelo próprio app.** Quando sai uma versão nova, o app avisa,
+  baixa e chama o instalador. A vovó só toca em "Atualizar agora".
 - Filtros por tema: abertos nacionais, São Paulo e Mogi das Cruzes, religiosos,
-  notícias, filmes e novelas, infantil, esportes e América Latina.
-- Verificação de sinal antes de entrar no canal, com barra de saúde por canal,
-  para a vovó não cair em tela preta.
+  notícias, filmes e novelas, infantil, esportes e América Latina, escolhidos
+  numa lista de tela cheia em vez de uma fita que rola de lado.
+- Verificação de sinal automática, rodando sozinha em segundo plano. Ela nunca
+  aparece para a vovó: só serve para pôr os canais bons na frente e sumir com
+  os que estão fora do ar.
 - Suporte a controle remoto e TV Box, com navegação por D-Pad, teclas de volume
-  e tela cheia com um toque.
-- Importação de lista M3U própria pela tela de configuração.
+  e tela cheia ao deitar o aparelho.
+- Importação de lista M3U própria pela tela de ajustes.
 
 ### Rádios da Vovó (`radios-vovo-app`)
 
@@ -77,6 +83,12 @@ Rodar no navegador durante o desenvolvimento:
 npm run dev
 ```
 
+Rodar os testes:
+
+```bash
+npm test
+```
+
 Gerar o APK de instalação:
 
 ```bash
@@ -86,6 +98,24 @@ cd android && ./gradlew assembleDebug
 ```
 
 O APK sai em `android/app/build/outputs/apk/debug/`.
+
+---
+
+## Publicar uma atualização
+
+O app avisa a vovó sozinho quando existe versão nova. Para publicar uma:
+
+1. Suba o `versionCode` e o `versionName` em
+   `vovo-tv-app/android/app/build.gradle`. O `versionCode` precisa ser **maior**
+   que o instalado, senão o app não oferece nada.
+2. Gere o APK e publique na aba *Releases* deste repositório.
+3. Edite `vovo-tv-app/update.json` com o mesmo `versionCode`, o `versionName`, a
+   URL do APK publicado e uma frase curta em `notes` explicando o que mudou.
+   Essa frase é lida pela vovó, então nada de "refactor" ou "bump deps".
+4. Faça commit do `update.json`. O app checa a cada 6 horas e na abertura.
+
+Quem já dispensou uma versão não é perguntado de novo sobre ela, mas o botão
+*Procurar atualização* em Ajustes força a checagem na hora.
 
 ---
 
@@ -100,10 +130,48 @@ e o app fica com a grade inteira sem tocar. Por isso os dois apps usam
 
 ### Verificação de sinal
 
-Canal de IPTV aberto cai o tempo todo. Antes de mostrar a grade, o app testa os
-canais em segundo plano e marca os que responderam, exibido pelo componente
-`SignalBars`. A vovó vê a barrinha e sabe se vale a pena tocar, em vez de abrir
-uma tela preta e achar que quebrou.
+Canal de IPTV aberto cai o tempo todo. O app testa os canais em segundo plano,
+sozinho, e usa o resultado só para ordenar: o que responde rápido sobe, o que
+está morto some da grade (a não ser que seja favorito, senão a vovó abre os
+favoritos e não acha o que guardou).
+
+O número em milissegundos, a contagem de "bons e fracos" e o botão de testar na
+mão viviam na tela inicial e empurravam o primeiro canal para fora dela. Hoje
+tudo isso mora em Ajustes, que é onde quem cuida do app precisa, e não ela.
+
+### Espelhamento DLNA
+
+O WebView do Android não abre socket UDP, e a descoberta de TVs na rede é SSDP,
+que é multicast UDP puro. Por isso o `DlnaBridge` é um plugin nativo em Java,
+sem biblioteca externa: manda um `M-SEARCH`, lê o XML de descrição de cada
+aparelho que responde, guarda a URL de controle do `AVTransport` e depois emite
+`SetAVTransportURI` seguido de `Play` por SOAP.
+
+Dois detalhes que custaram a descobrir e valem ficar escritos:
+
+- Sem `MulticastLock` (e a permissão `CHANGE_WIFI_MULTICAST_STATE`) o Android
+  descarta os pacotes multicast para poupar bateria, e a busca volta sempre
+  vazia mesmo com a TV ligada do lado.
+- O `controlURL` precisa vir do **mesmo** bloco `<service>` que o
+  `serviceType`. Casar um com o outro entre blocos diferentes manda o comando
+  para o endereço errado, e a TV ignora sem responder nada.
+
+**Limitação real:** muitas TVs com DLNA não abrem HLS (`.m3u8`), que é o formato
+da maior parte dos canais de IPTV. Nesses casos a TV recebe o comando e fica
+parada. O app detecta o formato e avisa antes de tentar, em vez de deixar a
+pessoa achando que quebrou.
+
+### Atualização pelo próprio app
+
+O app não vive na Play Store. O caminho normal para atualizar seria abrir o
+navegador, achar a pasta de downloads, tocar no arquivo e liberar "origem
+desconhecida", que é passo demais para a vovó.
+
+Então o app lê o `vovo-tv-app/update.json` deste repositório, compara o
+`versionCode` com o instalado e, se houver versão nova, oferece baixar. O
+download usa o `DownloadManager` do sistema e o APK é entregue ao instalador
+pelo `FileProvider`. Falha de rede aqui nunca vira mensagem de erro: o app
+simplesmente segue funcionando.
 
 ### Decisões de interface
 
@@ -111,22 +179,29 @@ uma tela preta e achar que quebrou.
 |---|---|
 | Ícone sem texto | Ícone com rótulo escrito por extenso |
 | Menu lateral | Tudo na tela inicial |
-| Alvo de toque de 48px | Cartão ocupando meia largura da tela |
+| Alvo de toque de 48px | Mínimo de 56px, e o cartão inteiro é o botão |
 | Confirmação com "Cancelar" e "OK" | Botão único e grande |
+| Fita de categorias que rola de lado | Lista de tela cheia, uma por linha |
+| Diagnóstico técnico na tela | Escondido em Ajustes |
+| Erro em linguagem de sistema | "Este canal não está no ar agora." |
 
 ---
 
 ## Estrutura
 
 ```
-vovo-tv-app/           app de TV ao vivo
-├── src/components/    grade, player, filtros e barra de sinal
-├── src/data/          lista de canais padrão
-└── android/           projeto Capacitor
-radios-vovo-app/       app de rádio
-├── src/components/    cartões, player fixo e timer soneca
-├── src/data/          lista de emissoras
-└── android/           projeto Capacitor
+vovo-tv-app/              app de TV ao vivo
+├── src/components/       grade, player, painéis de tela cheia
+├── src/utils/            nomes, categorias, saúde, DLNA, atualizador
+├── src/data/             lista de canais padrão
+├── android/.../TvBridge.java      brilho, volume, rotação, tela acesa
+├── android/.../DlnaBridge.java    descoberta SSDP e controle AVTransport
+├── android/.../UpdateBridge.java  download do APK e chamada do instalador
+└── update.json           manifesto de versão lido pelo app
+radios-vovo-app/          app de rádio
+├── src/components/       cartões, player fixo e timer soneca
+├── src/data/             lista de emissoras
+└── android/              projeto Capacitor
 ```
 
 O visualizador de câmeras da casa fica em repositório separado, porque guarda as
@@ -142,8 +217,11 @@ boa parte deles de terceiros, e o lugar deles é a aba de releases.
 | Sintoma | Causa provável | Solução |
 |---|---|---|
 | Grade inteira sem tocar | esquema `https` no Capacitor | Confira `androidScheme: 'http'` no `capacitor.config.ts` |
-| Canal específico em tela preta | stream fora do ar | Normal em IPTV aberto, a barra de sinal já avisa |
+| Canal específico em tela preta | stream fora do ar | Normal em IPTV aberto; o app desiste em 20s e oferece tentar de novo |
 | `npx cap sync` reclama de `dist` | build não foi feito | Rode `npm run build` antes |
+| "Nenhuma TV encontrada" com a TV ligada | celular e TV em redes diferentes, ou a TV está com DLNA desligado | Confira o Wi-Fi dos dois e procure por "DLNA" ou "compartilhamento de mídia" no menu da TV |
+| A TV recebe o canal mas fica parada | a TV não abre HLS | Sem solução pelo app; assista pelo celular ou escolha um canal que não seja `.m3u8` |
+| Atualização baixa e não instala | falta liberar "instalar apps desconhecidos" | O próprio app abre a tela certa; ligue a chave e volte |
 
 ---
 

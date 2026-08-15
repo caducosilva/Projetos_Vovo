@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import defaultChannelsData from './data/default_channels.json';
 import type { Channel, ChannelWithHealth, CategoryKey } from './types';
-import { getChannelCategory } from './utils/categories';
+import { getChannelCategory, CATEGORIES } from './utils/categories';
 import {
   loadHealth,
   saveHealth,
@@ -14,124 +14,80 @@ import {
   emptyEntry
 } from './utils/health';
 import type { HealthMap, ProbeResult } from './utils/health';
+import { checkForUpdate, type AvailableUpdate } from './utils/updater';
+import { dedupe, migrarFavoritos } from './utils/channelList';
 import { Header } from './components/Header';
-import { CategoryFilter } from './components/CategoryFilter';
-import { CountryFilter } from './components/CountryFilter';
-import { HealthBar } from './components/HealthBar';
+import { CategoryBar } from './components/CategoryBar';
+import { CategorySheet } from './components/CategorySheet';
 import { ChannelCard } from './components/ChannelCard';
 import { VideoPlayer } from './components/VideoPlayer';
-import { ImportModal } from './components/ImportModal';
-import { Sparkles, AlertCircle, Plus } from 'lucide-react';
-
-const COUNTRY_NAMES: Record<string, { label: string; flag: string }> = {
-  br: { label: 'Brasil', flag: '🇧🇷' },
-  ar: { label: 'Argentina', flag: '🇦🇷' },
-  uy: { label: 'Uruguai', flag: '🇺🇾' },
-  cl: { label: 'Chile', flag: '🇨🇱' },
-  co: { label: 'Colômbia', flag: '🇨🇴' },
-  mx: { label: 'México', flag: '🇲🇽' },
-  pe: { label: 'Peru', flag: '🇵🇪' },
-  pt: { label: 'Portugal', flag: '🇵🇹' }
-};
+import { SettingsSheet } from './components/SettingsSheet';
+import { UpdatePrompt } from './components/UpdatePrompt';
+import { SearchX, Plus } from 'lucide-react';
 
 const PROBE_WORKERS = 4;
-const INITIAL_PAGE_SIZE = 40;
-
-/** Remove canais repetidos pela URL, mantendo o primeiro. */
-function dedupe(list: Channel[]): Channel[] {
-  const seen = new Set<string>();
-  const out: Channel[] = [];
-  for (const ch of list) {
-    const key = (ch.url || '').trim();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(ch);
-  }
-  return out;
-}
+const PROBE_LOTE = 60;
+const PAGINA = 40;
 
 export default function App() {
-  // Channels state
   const [channels, setChannels] = useState<Channel[]>(() => {
     try {
-      const savedCustom = localStorage.getItem('vovo_tv_custom_channels');
-      const custom: Channel[] = savedCustom ? JSON.parse(savedCustom) : [];
-      return dedupe([...(defaultChannelsData as Channel[]), ...custom]);
+      const salvos = localStorage.getItem('vovo_tv_custom_channels');
+      const proprios: Channel[] = salvos ? JSON.parse(salvos) : [];
+      return dedupe([...(defaultChannelsData as Channel[]), ...proprios]);
     } catch {
       return dedupe(defaultChannelsData as Channel[]);
     }
   });
 
-  /**
-   * Favoritos guardados SO pela URL do canal.
-   * Antes salvava pelo id tambem, mas a lista tem id repetido (ex: o mesmo
-   * "RecordNews.br@SD" em 11 canais), entao favoritar um marcava todos e a
-   * estrela piscava. Aqui tambem converte os favoritos antigos salvos por id.
-   */
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem('vovo_tv_favorites');
-      const raw: string[] = saved ? JSON.parse(saved) : [];
-      if (raw.length === 0) return [];
-
-      const urls = new Set(channels.map((c) => c.url));
-      const firstUrlById = new Map<string, string>();
-      for (const c of channels) {
-        if (c.id && !firstUrlById.has(c.id)) firstUrlById.set(c.id, c.url);
-      }
-
-      const migrated = new Set<string>();
-      for (const value of raw) {
-        if (urls.has(value)) migrated.add(value);
-        else if (firstUrlById.has(value)) migrated.add(firstUrlById.get(value)!);
-      }
-      return [...migrated];
+      const salvo = localStorage.getItem('vovo_tv_favorites');
+      return migrarFavoritos(salvo ? JSON.parse(salvo) : [], channels);
     } catch {
       return [];
     }
   });
 
-  // Saude / força de sinal dos canais
   const [health, setHealth] = useState<HealthMap>(() => loadHealth());
   const healthRef = useRef<HealthMap>(health);
   const [probeState, setProbeState] = useState({ running: false, done: 0, total: 0 });
-  const stopRef = useRef(false);
-  const [hideDead, setHideDead] = useState<boolean>(() => {
-    return localStorage.getItem('vovo_tv_hide_dead') === '1';
-  });
+  const pararRef = useRef(false);
 
-  // Filters state
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('abertos');
-  const [selectedCountry, setSelectedCountry] = useState<string>('br');
+  const [visibleCount, setVisibleCount] = useState(PAGINA);
 
-  // Progressive rendering for high performance
-  const [visibleCount, setVisibleCount] = useState<number>(INITIAL_PAGE_SIZE);
-
-  // Player state
   const [activeChannel, setActiveChannel] = useState<ChannelWithHealth | null>(null);
+  /**
+   * Lista congelada no momento em que o canal abre.
+   *
+   * A lista da grade se reordena sozinha conforme o teste de sinal chega. Se o
+   * player usasse ela ao vivo, "proximo canal" pularia para um lugar aleatorio
+   * no meio da novela. O congelamento mantem a ordem estavel ate fechar.
+   */
+  const [playerList, setPlayerList] = useState<ChannelWithHealth[]>([]);
 
-  // Modal state
-  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [categoriaAberta, setCategoriaAberta] = useState(false);
+  const [ajustesAbertos, setAjustesAbertos] = useState(false);
+  const [atualizacao, setAtualizacao] = useState<AvailableUpdate | null>(null);
 
-  // Reset pagination on filter change
   useEffect(() => {
-    setVisibleCount(INITIAL_PAGE_SIZE);
-  }, [selectedCategory, selectedCountry, searchTerm]);
+    setVisibleCount(PAGINA);
+  }, [selectedCategory, searchTerm]);
 
-  // Save favorites to localStorage
   useEffect(() => {
-    localStorage.setItem('vovo_tv_favorites', JSON.stringify(favorites));
+    try {
+      localStorage.setItem('vovo_tv_favorites', JSON.stringify(favorites));
+    } catch {
+      /* sem espaco em disco: os favoritos seguem valendo nesta sessao */
+    }
   }, [favorites]);
 
-  useEffect(() => {
-    localStorage.setItem('vovo_tv_hide_dead', hideDead ? '1' : '0');
-  }, [hideDead]);
-
-  /** Grava a saude no ref na hora e joga pra tela em lotes */
+  // Grava a saude no ref na hora e joga pra tela em lotes
   const flushTimerRef = useRef<number | null>(null);
-  const commitHealth = useCallback((next: HealthMap) => {
-    healthRef.current = next;
+  const commitHealth = useCallback((proximo: HealthMap) => {
+    healthRef.current = proximo;
     if (flushTimerRef.current !== null) return;
     flushTimerRef.current = window.setTimeout(() => {
       flushTimerRef.current = null;
@@ -140,514 +96,324 @@ export default function App() {
     }, 1500);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current);
+      pararRef.current = true;
+    };
+  }, []);
+
   const handleProbeResult = useCallback(
-    (url: string, result: ProbeResult) => {
-      const next = { ...healthRef.current };
-      next[url] = applyProbeResult(next[url], result);
-      commitHealth(next);
-      setProbeState((prev) => ({ ...prev, done: prev.done + 1 }));
+    (url: string, resultado: ProbeResult) => {
+      const proximo = { ...healthRef.current };
+      proximo[url] = applyProbeResult(proximo[url], resultado);
+      commitHealth(proximo);
+      setProbeState((anterior) => ({ ...anterior, done: anterior.done + 1 }));
     },
     [commitHealth]
   );
 
   const handlePlaybackOk = useCallback(
     (url: string) => {
-      const next = { ...healthRef.current };
-      next[url] = markConfirmed(next[url]);
-      commitHealth(next);
+      const proximo = { ...healthRef.current };
+      proximo[url] = markConfirmed(proximo[url]);
+      commitHealth(proximo);
     },
     [commitHealth]
   );
 
   const handlePlaybackFail = useCallback(
-    (url: string, error: string) => {
-      const next = { ...healthRef.current };
-      next[url] = markPlaybackFail(next[url], error);
-      commitHealth(next);
+    (url: string, erro: string) => {
+      const proximo = { ...healthRef.current };
+      proximo[url] = markPlaybackFail(proximo[url], erro);
+      commitHealth(proximo);
     },
     [commitHealth]
   );
 
+  const rodandoRef = useRef(false);
   const startProbe = useCallback(
     async (urls: string[]) => {
-      if (urls.length === 0 || probeState.running) return;
-      stopRef.current = false;
+      if (urls.length === 0 || rodandoRef.current) return;
+      rodandoRef.current = true;
+      pararRef.current = false;
       setProbeState({ running: true, done: 0, total: urls.length });
-      await runBatchProbe(urls, PROBE_WORKERS, handleProbeResult, () => stopRef.current);
-      setProbeState((prev) => ({ ...prev, running: false }));
+
+      await runBatchProbe(urls, PROBE_WORKERS, handleProbeResult, () => pararRef.current);
+
+      rodandoRef.current = false;
+      setProbeState((anterior) => ({ ...anterior, running: false }));
       setHealth({ ...healthRef.current });
       saveHealth(healthRef.current);
     },
-    [handleProbeResult, probeState.running]
+    [handleProbeResult]
   );
 
   const stopProbe = useCallback(() => {
-    stopRef.current = true;
-    setProbeState((prev) => ({ ...prev, running: false }));
+    pararRef.current = true;
+    rodandoRef.current = false;
+    setProbeState((anterior) => ({ ...anterior, running: false }));
+  }, []);
+
+  /** Canais que nunca foram testados ou cujo teste ja envelheceu. */
+  const urlsPendentes = useCallback(() => {
+    return channels
+      .map((c) => c.url)
+      .filter((url) => {
+        const entrada = healthRef.current[url];
+        return !entrada || entrada.status !== 'confirmed' || isStale(entrada);
+      });
+  }, [channels]);
+
+  const handleStartProbe = useCallback(() => {
+    const pendentes = urlsPendentes();
+    const alvo = pendentes.length > 0 ? pendentes : channels.map((c) => c.url);
+    startProbe(alvo.slice(0, PROBE_LOTE));
+  }, [channels, startProbe, urlsPendentes]);
+
+  /**
+   * Teste automatico ao abrir.
+   *
+   * A vovo nao deve precisar apertar "verificar sinal": o app testa sozinho e
+   * usa o resultado so para ordenar a grade. O atraso deixa a primeira tela
+   * desenhar antes de disputar a rede.
+   */
+  useEffect(() => {
+    const agendado = window.setTimeout(() => {
+      const pendentes = urlsPendentes();
+      if (pendentes.length > 0) startProbe(pendentes.slice(0, PROBE_LOTE));
+    }, 2500);
+    return () => window.clearTimeout(agendado);
+    // Roda uma vez por abertura do app, de proposito.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Procura versao nova em segundo plano; falhar aqui nunca incomoda a vovo
+  useEffect(() => {
+    checkForUpdate().then((nova) => {
+      if (nova) setAtualizacao(nova);
+    });
   }, []);
 
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
 
   const isFavorite = useCallback(
-    (channel: Channel) => favoriteSet.has((channel.url || '').trim()),
+    (canal: Channel) => favoriteSet.has((canal.url || '').trim()),
     [favoriteSet]
   );
 
-  const handleToggleFavorite = useCallback((channel: Channel) => {
-    const key = (channel.url || '').trim();
-    if (!key) return;
-    setFavorites((prev) => {
-      const next = prev.includes(key) ? prev.filter((u) => u !== key) : [...prev, key];
+  const handleToggleFavorite = useCallback((canal: Channel) => {
+    const chave = (canal.url || '').trim();
+    if (!chave) return;
+    setFavorites((anterior) =>
+      anterior.includes(chave) ? anterior.filter((u) => u !== chave) : [...anterior, chave]
+    );
+  }, []);
+
+  const handleImportChannels = useCallback((novos: Channel[]) => {
+    setChannels((anterior) => {
+      const unicos = dedupe([...novos, ...anterior]);
       try {
-        localStorage.setItem('vovo_tv_favorites', JSON.stringify(next));
+        localStorage.setItem(
+          'vovo_tv_custom_channels',
+          JSON.stringify(unicos.filter((c) => c.isCustom))
+        );
       } catch {
-        /* sem espaço: mantem so em memoria */
+        /* sem espaco: os canais valem nesta sessao */
       }
-      return next;
+      return unicos;
     });
   }, []);
 
-  const handleImportChannels = useCallback((newChannels: Channel[]) => {
-    setChannels((prev) => {
-      const unique = dedupe([...newChannels, ...prev]);
-      const customOnly = unique.filter((c) => c.isCustom);
-      localStorage.setItem('vovo_tv_custom_channels', JSON.stringify(customOnly));
-      return unique;
-    });
-  }, []);
-
-  // Canais + saude memoized
   const enrichedChannels = useMemo<ChannelWithHealth[]>(() => {
-    return channels.map((ch) => {
-      const entry = health[ch.url];
-      const score = entry ? (entry.signal ?? signalScore(entry)) : signalScore(emptyEntry());
+    return channels.map((canal) => {
+      const entrada = health[canal.url];
+      const nota = entrada ? (entrada.signal ?? signalScore(entrada)) : signalScore(emptyEntry());
       return {
-        ...ch,
-        health: entry?.status ?? 'unknown',
-        signalStrength: score,
-        latencyMs: entry?.latency_ms
+        ...canal,
+        health: entrada?.status ?? 'unknown',
+        signalStrength: nota,
+        latencyMs: entrada?.latency_ms
       };
     });
   }, [channels, health]);
 
-  // Category counts calculation
   const categoryCounts = useMemo(() => {
-    const scopedChannels =
-      selectedCountry === 'todos'
-        ? channels
-        : channels.filter((c) => (c.country || 'br').toLowerCase() === selectedCountry.toLowerCase());
-
-    const counts: Record<string, number> = {
-      todos: scopedChannels.length,
-      brasil: channels.filter((c) => (c.country || 'br').toLowerCase() === 'br').length,
-      latam: channels.filter((c) => (c.country || 'br').toLowerCase() !== 'br').length,
+    const contagem: Record<string, number> = {
+      todos: channels.length,
+      brasil: 0,
+      latam: 0,
       favoritos: 0
     };
 
-    for (const ch of scopedChannels) {
-      if (favoriteSet.has(ch.url)) {
-        counts.favoritos = (counts.favoritos || 0) + 1;
-      }
-      const cats = getChannelCategory(ch);
-      for (const cat of cats) {
-        counts[cat] = (counts[cat] || 0) + 1;
+    for (const canal of channels) {
+      const pais = (canal.country || 'br').toLowerCase();
+      if (pais === 'br') contagem.brasil++;
+      else contagem.latam++;
+
+      if (favoriteSet.has(canal.url)) contagem.favoritos++;
+
+      for (const categoria of getChannelCategory(canal)) {
+        contagem[categoria] = (contagem[categoria] || 0) + 1;
       }
     }
 
-    return counts;
-  }, [channels, favorites, selectedCountry]);
+    return contagem;
+  }, [channels, favoriteSet]);
 
   const healthCounts = useMemo(() => {
     let ok = 0;
     let doubt = 0;
     let dead = 0;
     let untested = 0;
-    for (const ch of enrichedChannels) {
-      if (ch.health === 'ok' || ch.health === 'confirmed') ok++;
-      else if (ch.health === 'doubt') doubt++;
-      else if (ch.health === 'dead') dead++;
+    for (const canal of enrichedChannels) {
+      if (canal.health === 'ok' || canal.health === 'confirmed') ok++;
+      else if (canal.health === 'doubt') doubt++;
+      else if (canal.health === 'dead') dead++;
       else untested++;
     }
     return { ok, doubt, dead, untested };
   }, [enrichedChannels]);
 
-  // Available countries calculation
-  const availableCountries = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const ch of channels) {
-      const c = (ch.country || 'br').toLowerCase();
-      counts[c] = (counts[c] || 0) + 1;
-    }
-
-    const list = [
-      { code: 'todos', label: 'Todos os Países', flag: '🌍', count: channels.length },
-      ...Object.entries(counts).map(([code, count]) => ({
-        code,
-        label: COUNTRY_NAMES[code]?.label || code.toUpperCase(),
-        flag: COUNTRY_NAMES[code]?.flag || '🏳️',
-        count
-      }))
-    ];
-
-    return list;
-  }, [channels]);
-
-  const handleSelectCategory = useCallback((cat: CategoryKey) => {
-    setSelectedCategory(cat);
-    if (cat === 'brasil') {
-      setSelectedCountry('br');
-    } else if (cat === 'latam') {
-      setSelectedCountry('todos');
-    }
-  }, []);
-
-  // Filtered + ordenado por força de sinal
+  /**
+   * Lista da grade: filtra, esconde o que ja provou estar morto e ordena pelo
+   * sinal. Canal sem sinal so aparece se for favorito, senao a vovo abre a
+   * pasta de favoritos e nao acha o que guardou.
+   */
   const filteredChannels = useMemo<ChannelWithHealth[]>(() => {
-    const out = enrichedChannels.filter((ch) => {
-      // 1. Search filter: When searching, search across ALL channels
-      if (searchTerm.trim()) {
-        const query = searchTerm.toLowerCase().trim();
-        const matchesName = (ch.name || '').toLowerCase().includes(query);
-        const matchesGroup = (ch.group || '').toLowerCase().includes(query);
-        return matchesName || matchesGroup;
+    const busca = searchTerm.trim().toLowerCase();
+
+    const saida = enrichedChannels.filter((canal) => {
+      if (busca) {
+        return (
+          (canal.name || '').toLowerCase().includes(busca) ||
+          (canal.group || '').toLowerCase().includes(busca)
+        );
       }
 
-      // 2. Esconder canais mortos
-      if (hideDead && ch.health === 'dead' && !isFavorite(ch)) return false;
+      if (canal.health === 'dead' && !isFavorite(canal)) return false;
 
-      // 3. Category filter
-      if (selectedCategory === 'todos') {
-        if (selectedCountry !== 'todos') {
-          return (ch.country || 'br').toLowerCase() === selectedCountry.toLowerCase();
-        }
-        return true;
-      } else if (selectedCategory === 'brasil') {
-        return (ch.country || 'br').toLowerCase() === 'br';
-      } else if (selectedCategory === 'latam') {
-        return (ch.country || 'br').toLowerCase() !== 'br';
-      } else if (selectedCategory === 'favoritos') {
-        return isFavorite(ch);
-      } else {
-        const cats = getChannelCategory(ch);
-        const matchesCategory = cats.includes(selectedCategory);
-        if (!matchesCategory) return false;
+      if (selectedCategory === 'todos') return true;
+      if (selectedCategory === 'brasil') return (canal.country || 'br').toLowerCase() === 'br';
+      if (selectedCategory === 'latam') return (canal.country || 'br').toLowerCase() !== 'br';
+      if (selectedCategory === 'favoritos') return isFavorite(canal);
 
-        if (selectedCountry !== 'todos') {
-          return (ch.country || 'br').toLowerCase() === selectedCountry.toLowerCase();
-        }
-        return true;
-      }
+      return getChannelCategory(canal).includes(selectedCategory);
     });
 
-    out.sort((a, b) => {
+    saida.sort((a, b) => {
       if (b.signalStrength !== a.signalStrength) return b.signalStrength - a.signalStrength;
-      const la = a.latencyMs ?? 99_999;
-      const lb = b.latencyMs ?? 99_999;
-      if (la !== lb) return la - lb;
+      const latenciaA = a.latencyMs ?? 99_999;
+      const latenciaB = b.latencyMs ?? 99_999;
+      if (latenciaA !== latenciaB) return latenciaA - latenciaB;
       return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
     });
 
-    return out;
-  }, [
-    enrichedChannels,
-    searchTerm,
-    selectedCategory,
-    selectedCountry,
-      favorites,
-    hideDead,
-    isFavorite
-  ]);
+    return saida;
+  }, [enrichedChannels, searchTerm, selectedCategory, isFavorite]);
 
-  // Visible sliced list for fast rendering
-  const visibleChannels = useMemo(() => {
-    return filteredChannels.slice(0, visibleCount);
-  }, [filteredChannels, visibleCount]);
+  const visibleChannels = useMemo(
+    () => filteredChannels.slice(0, visibleCount),
+    [filteredChannels, visibleCount]
+  );
 
-  const hasMore = visibleCount < filteredChannels.length;
+  const abrirCanal = useCallback(
+    (canal: ChannelWithHealth) => {
+      setPlayerList(filteredChannels);
+      setActiveChannel(canal);
+    },
+    [filteredChannels]
+  );
 
-  const handleLoadMore = useCallback(() => {
-    setVisibleCount((prev) => prev + 30);
-  }, []);
-
-  // Navegacao de canal dentro do player (swipe e gaveta de canais)
-  const currentChannelIndex = useMemo(() => {
+  const indiceAtual = useMemo(() => {
     if (!activeChannel) return -1;
-    return filteredChannels.findIndex((c) => c.url === activeChannel.url);
-  }, [activeChannel, filteredChannels]);
+    return playerList.findIndex((c) => c.url === activeChannel.url);
+  }, [activeChannel, playerList]);
 
-  const handlePrevChannel = useCallback(() => {
-    if (filteredChannels.length === 0 || currentChannelIndex === -1) return;
-    const prevIdx = (currentChannelIndex - 1 + filteredChannels.length) % filteredChannels.length;
-    setActiveChannel(filteredChannels[prevIdx]);
-  }, [currentChannelIndex, filteredChannels]);
+  const irParaCanal = useCallback(
+    (passo: number) => {
+      if (playerList.length === 0 || indiceAtual === -1) return;
+      const proximo = (indiceAtual + passo + playerList.length) % playerList.length;
+      setActiveChannel(playerList[proximo]);
+    },
+    [indiceAtual, playerList]
+  );
 
-  const handleNextChannel = useCallback(() => {
-    if (filteredChannels.length === 0 || currentChannelIndex === -1) return;
-    const nextIdx = (currentChannelIndex + 1) % filteredChannels.length;
-    setActiveChannel(filteredChannels[nextIdx]);
-  }, [currentChannelIndex, filteredChannels]);
-
-  // Category Header Info
-  const categoryHeaderInfo = useMemo(() => {
-    switch (selectedCategory) {
-      case 'favoritos':
-        return {
-          title: '⭐ Meus Canais Favoritos',
-          desc: 'Canais que você marcou com a estrelinha para achar rápido.'
-        };
-      case 'abertos':
-        return {
-          title: '📺 Canais Abertos Nacionais',
-          desc: 'Globo, SBT, Record, Band, TV Cultura, RedeTV e emissoras abertas de todo o Brasil.'
-        };
-      case 'radios-todas':
-        return {
-          title: '📻 Rádios do Brasil (Ao Vivo)',
-          desc: 'Centenas de emissoras de rádio online ordenadas da melhor força de sinal para o pior.'
-        };
-      case 'radios-sp':
-        return {
-          title: '📍 Rádios de São Paulo (SP)',
-          desc: 'Alpha FM, 89 Rock, Antena 1, Jovem Pan, Band FM, Nativa FM, Gazeta, Metropolitana e rádios paulistas.'
-        };
-      case 'radios-mg':
-        return {
-          title: '☕ Rádios de Minas Gerais (Belo Horizonte)',
-          desc: 'Rádio Itatiaia, Alvorada FM, 98 FM, Inconfidência, CDL FM e rádios mineiras.'
-        };
-      case 'radios-ba':
-        return {
-          title: '🌴 Rádios da Bahia (Salvador)',
-          desc: 'Rádio Sociedade da Bahia, Piatã FM, Bahia FM, Salvador FM, Itapoan e emissoras baianas.'
-        };
-      case 'radios-rj':
-        return {
-          title: '🏖️ Rádios do Rio de Janeiro',
-          desc: 'JB FM, FM O Dia, Rádio Tupi, Rádio Melodia, Rádio Cidade, Paradiso e rádios cariocas.'
-        };
-      case 'radios-sul':
-        return {
-          title: '🧉 Rádios da Região Sul (RS, PR, SC)',
-          desc: 'Rádio Gaúcha, Atlântida, Guaíba, Massa FM, Mundo Livre FM, Regional FM e rádios do Sul.'
-        };
-      case 'radios-co':
-        return {
-          title: '🏛️ Rádios Centro-Oeste & Brasília',
-          desc: 'Rádio Senado, Rádio Câmara, BandNews Brasília, Clube FM, Positiva FM e rádios do Centro-Oeste.'
-        };
-      case 'radios-ne':
-        return {
-          title: '☀️ Rádios Nordeste (Recife, Fortaleza, Natal)',
-          desc: 'Rádio Jornal Recife, Verdes Mares, Jangadeiro FM, 96 FM Natal, Mirante FM e rádios nordestinas.'
-        };
-      case 'radios-norte':
-        return {
-          title: '🌳 Rádios Norte (Manaus, Belém)',
-          desc: 'Rádio Liberal, Difusora Manaus, Boas Novas e rádios da Região Norte e Amazônia.'
-        };
-      case 'brasil':
-        return {
-          title: '🇧🇷 Todos os Canais do Brasil',
-          desc: 'Lista completa de canais brasileiros (Abertos, Notícias, Filmes, Religiosos, Regionais).'
-        };
-      case 'sp-mogi':
-        return {
-          title: '📍 São Paulo & Mogi das Cruzes',
-          desc: 'TV Diário Mogi, Globo SP, Record SP, Band SP, TV Gazeta e emissoras paulistas.'
-        };
-      case 'religioso':
-        return {
-          title: '🙏 Religiosos, Missas & Fé',
-          desc: 'TV Aparecida, Canção Nova, Rede Vida, Evangelizar, RIT e canais de oração.'
-        };
-      case 'noticias':
-        return {
-          title: '📰 Notícias & Jornalismo',
-          desc: 'Record News, BandNews, CNN Brasil, Jovem Pan News e canais informativos.'
-        };
-      case 'filmes':
-        return {
-          title: '🎬 Filmes & Cinema',
-          desc: 'Canais de filmes, clássicos e cinema 24 horas.'
-        };
-      case 'series':
-        return {
-          title: '🍿 Séries & Novelas',
-          desc: 'Novelas clássicas e séries completas.'
-        };
-      case 'infantil':
-        return {
-          title: '🧸 Infantil & Desenhos Animados',
-          desc: 'Pluto TV Kids, Nickelodeon, desenhos e programação infantil.'
-        };
-      case 'esportes':
-        return {
-          title: '⚽ Futebol & Esportes',
-          desc: 'BandSports, canais esportivos e futebol ao vivo.'
-        };
-      case 'bahia':
-        return {
-          title: '🌴 Bahia & Região Nordeste',
-          desc: 'TVE Bahia, TV Aratu, canais de Salvador e do Nordeste.'
-        };
-      case 'latam':
-        return {
-          title: '🌎 América Latina & Portugal',
-          desc: 'Emissoras de países vizinhos: Argentina, Uruguai, Chile, Colômbia, México e Portugal.'
-        };
-      case 'musica':
-        return {
-          title: '🎵 Música & Shows',
-          desc: 'Canais de videoclipes, shows e transmissões musicais.'
-        };
-      case 'documentarios':
-        return {
-          title: '📚 Documentários & Cultura',
-          desc: 'Natureza, história, ciência e canais educativos.'
-        };
-      default:
-        return {
-          title: '🌐 Todos os Canais',
-          desc: 'Todos os canais disponíveis no aplicativo.'
-        };
-    }
-  }, [selectedCategory]);
-
-  /** Botão "Verificar sinal": re-testa o que está velho ou nunca testado */
-  const handleStartProbe = useCallback(() => {
-    const urls = channels
-      .map((c) => c.url)
-      .filter((url) => {
-        const entry = healthRef.current[url];
-        return !entry || entry.status !== 'confirmed' || isStale(entry);
-      });
-    startProbe(urls.length > 0 ? urls.slice(0, 50) : channels.map((c) => c.url).slice(0, 50));
-  }, [channels, startProbe]);
+  const rotuloCategoria = useMemo(() => {
+    if (searchTerm.trim()) return `Busca: ${searchTerm.trim()}`;
+    return CATEGORIES.find((c) => c.key === selectedCategory)?.label ?? 'Canais';
+  }, [selectedCategory, searchTerm]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none antialiased">
-      {/* Header */}
-      <Header
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        onOpenImport={() => setIsImportModalOpen(true)}
-        totalChannels={channels.length}
-      />
-
-      {/* Category Rail Filter */}
-      <div className="bg-slate-900/90 border-b border-slate-800 sticky top-[73px] z-30 backdrop-blur-md">
-        <CategoryFilter
-          selectedCategory={selectedCategory}
-          onSelectCategory={handleSelectCategory}
-          categoryCounts={categoryCounts}
+    <div className="flex min-h-screen flex-col bg-noite-900 text-tinta-100">
+      <div className="sticky top-0 z-40">
+        <Header
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          onOpenSettings={() => setAjustesAbertos(true)}
         />
-        <CountryFilter
-          selectedCountry={selectedCountry}
-          onSelectCountry={setSelectedCountry}
-          availableCountries={availableCountries}
-        />
-        <HealthBar
-          running={probeState.running}
-          done={probeState.done}
-          total={probeState.total}
-          counts={healthCounts}
-          hideDead={hideDead}
-          onToggleHideDead={() => setHideDead((v) => !v)}
-          onStart={handleStartProbe}
-          onStop={stopProbe}
+        <CategoryBar
+          label={rotuloCategoria}
+          count={filteredChannels.length}
+          onOpenPicker={() => setCategoriaAberta(true)}
         />
       </div>
 
-      {/* Main Channel Grid */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 pb-20">
-        {/* Active Category Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 bg-slate-900 border border-slate-800 p-3.5 rounded-2xl">
-          <div>
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-400" />
-              <h2 className="text-xl md:text-2xl font-black text-white">
-                {categoryHeaderInfo.title}
-              </h2>
-            </div>
-            <p className="text-xs text-slate-400 font-medium mt-0.5">
-              {categoryHeaderInfo.desc}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {selectedCategory !== 'brasil' && (
-              <button
-                onClick={() => handleSelectCategory('brasil')}
-                className="text-xs font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40 px-3 py-1.5 rounded-xl hover:bg-amber-400 hover:text-slate-950 transition"
-              >
-                Ver todos os {categoryCounts['brasil'] || 666} do Brasil
-              </button>
-            )}
-            <span className="text-xs font-bold bg-slate-800 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700">
-              {filteredChannels.length} canais
-            </span>
-          </div>
-        </div>
-
-        {/* Channels Grid */}
+      <main className="area-segura-lados area-segura-base mx-auto w-full max-w-7xl flex-1 px-4 py-4">
         {filteredChannels.length > 0 ? (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4">
-              {visibleChannels.map((channel) => (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              {visibleChannels.map((canal) => (
                 <ChannelCard
-                  key={channel.url}
-                  channel={channel}
-                  isFavorite={isFavorite(channel)}
-                  onSelect={(ch) => setActiveChannel(ch)}
+                  key={canal.url}
+                  channel={canal}
+                  isFavorite={isFavorite(canal)}
+                  onSelect={abrirCanal}
                   onToggleFavorite={handleToggleFavorite}
                 />
               ))}
             </div>
 
-            {/* Load More Channels Button */}
-            {hasMore && (
-              <div className="flex justify-center mt-6">
-                <button
-                  onClick={handleLoadMore}
-                  className="flex items-center gap-2 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-white font-black px-6 py-3.5 rounded-2xl transition active:scale-95 shadow-md text-sm md:text-base"
-                >
-                  <Plus className="w-5 h-5 text-amber-400" />
-                  <span>Carregar mais canais ({filteredChannels.length - visibleCount} restantes)</span>
-                </button>
-              </div>
+            {visibleCount < filteredChannels.length && (
+              <button
+                onClick={() => setVisibleCount((anterior) => anterior + 30)}
+                className="mt-5 flex h-16 w-full items-center justify-center gap-2 rounded-2xl border-2 border-noite-500 bg-noite-700 text-xl font-black text-tinta-100 transition active:scale-95"
+              >
+                <Plus className="h-7 w-7 text-sol-400" strokeWidth={3} />
+                Mostrar mais canais
+              </button>
             )}
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center py-20 text-center px-4">
-            <div className="w-20 h-20 bg-slate-800 rounded-3xl flex items-center justify-center text-slate-500 mb-4">
-              <AlertCircle className="w-10 h-10" />
+          <div className="flex flex-col items-center gap-5 py-20 text-center">
+            <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-noite-700 text-tinta-500">
+              <SearchX className="h-12 w-12" strokeWidth={2} />
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Nenhum canal encontrado</h3>
-            <p className="text-slate-400 max-w-md text-sm mb-6">
-              Não encontramos nenhum canal com os filtros aplicados. Tente limpar a busca ou selecionar outra categoria.
+            <p className="text-2xl font-black text-tinta-100">Nenhum canal aqui</p>
+            <p className="max-w-sm text-lg leading-snug text-tinta-300">
+              Tente apagar a busca ou escolher outra categoria.
             </p>
             <button
               onClick={() => {
                 setSearchTerm('');
-                setSelectedCategory('brasil');
-                setSelectedCountry('br');
+                setSelectedCategory('abertos');
               }}
-              className="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-6 py-3 rounded-2xl transition shadow-lg active:scale-95"
+              className="flex h-toque items-center rounded-2xl bg-sol-400 px-6 text-xl font-black text-noite-900 transition active:scale-95"
             >
-              Ver Todos os Canais do Brasil
+              Ver canais de TV
             </button>
           </div>
         )}
       </main>
 
-      {/* Floating Video Player Modal */}
       {activeChannel && (
         <VideoPlayer
           channel={activeChannel}
-          channelList={filteredChannels}
-          onSelectChannel={(ch) => setActiveChannel(ch as ChannelWithHealth)}
+          channelList={playerList}
+          onSelectChannel={(canal) => setActiveChannel(canal as ChannelWithHealth)}
           onClose={() => setActiveChannel(null)}
-          onPrevChannel={filteredChannels.length > 1 ? handlePrevChannel : undefined}
-          onNextChannel={filteredChannels.length > 1 ? handleNextChannel : undefined}
+          onPrevChannel={playerList.length > 1 ? () => irParaCanal(-1) : undefined}
+          onNextChannel={playerList.length > 1 ? () => irParaCanal(1) : undefined}
           isFavorite={isFavorite(activeChannel)}
           onToggleFavorite={handleToggleFavorite}
           onPlaybackOk={handlePlaybackOk}
@@ -655,12 +421,31 @@ export default function App() {
         />
       )}
 
-      {/* Import M3U Modal */}
-      <ImportModal
-        isOpen={isImportModalOpen}
-        onClose={() => setIsImportModalOpen(false)}
-        onImportChannels={handleImportChannels}
+      <CategorySheet
+        isOpen={categoriaAberta}
+        selected={selectedCategory}
+        counts={categoryCounts}
+        onSelect={(categoria) => {
+          setSelectedCategory(categoria);
+          setSearchTerm('');
+        }}
+        onClose={() => setCategoriaAberta(false)}
       />
+
+      <SettingsSheet
+        isOpen={ajustesAbertos}
+        onClose={() => setAjustesAbertos(false)}
+        onImportChannels={handleImportChannels}
+        probeRunning={probeState.running}
+        probeDone={probeState.done}
+        probeTotal={probeState.total}
+        healthCounts={healthCounts}
+        onStartProbe={handleStartProbe}
+        onStopProbe={stopProbe}
+        onUpdateFound={setAtualizacao}
+      />
+
+      <UpdatePrompt update={atualizacao} onDismiss={() => setAtualizacao(null)} />
     </div>
   );
 }

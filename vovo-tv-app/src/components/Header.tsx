@@ -1,76 +1,61 @@
 import React from 'react';
-import { Search, PlusCircle, Tv, X } from 'lucide-react';
+import { Search, X, Settings, Tv } from 'lucide-react';
 
 interface HeaderProps {
   searchTerm: string;
   onSearchChange: (value: string) => void;
-  onOpenImport: () => void;
-  totalChannels: number;
+  onOpenSettings: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
-  searchTerm,
-  onSearchChange,
-  onOpenImport,
-  totalChannels
-}) => {
+/**
+ * Topo do app: marca, busca e ajustes. Nada mais.
+ *
+ * A contagem de canais, o seletor de pais e a barra de teste de sinal moravam
+ * aqui e empurravam o primeiro canal para fora da tela. A vovo abria o app e
+ * via painel, nao TV. Tudo isso saiu daqui.
+ */
+export const Header: React.FC<HeaderProps> = ({ searchTerm, onSearchChange, onOpenSettings }) => {
   return (
-    <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 shadow-md">
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
-        {/* Logo and App Title */}
-        <div className="flex items-center justify-between w-full md:w-auto">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-gradient-to-tr from-amber-500 to-amber-300 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20 text-slate-950">
-              <Tv className="w-7 h-7 stroke-[2.5]" />
-            </div>
-            <div>
-              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight flex items-center gap-2">
-                Vovó TV <span className="text-xs bg-amber-400/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-400/30">Brasil</span>
-              </h1>
-              <p className="text-xs font-semibold text-slate-400">
-                {totalChannels} canais prontos para assistir
-              </p>
-            </div>
+    <header className="area-segura-topo area-segura-lados border-b border-noite-600 bg-noite-800 px-4 pb-3">
+      <div className="mx-auto w-full max-w-7xl">
+        <div className="mb-3 flex items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sol-400 text-noite-900">
+            <Tv className="h-7 w-7" strokeWidth={2.5} />
           </div>
 
-          {/* Import M3U Button (Mobile) */}
+          <h1 className="flex-1 text-3xl font-black tracking-tight text-tinta-100">Vovó TV</h1>
+
           <button
-            onClick={onOpenImport}
-            className="md:hidden flex items-center gap-2 bg-amber-400 hover:bg-amber-500 active:scale-95 text-slate-950 font-black px-4 py-2 rounded-xl text-sm transition shadow-md"
+            onClick={onOpenSettings}
+            className="flex h-toque w-toque items-center justify-center rounded-2xl border-2 border-noite-500 bg-noite-700 text-tinta-300 transition active:scale-95 active:bg-noite-600"
+            aria-label="Abrir ajustes"
           >
-            <PlusCircle className="w-5 h-5" />
-            <span>Lista</span>
+            <Settings className="h-7 w-7" strokeWidth={2.5} />
           </button>
         </div>
 
-        {/* Search Bar & Desktop Import Button */}
-        <div className="flex items-center gap-3 w-full md:w-auto flex-1 max-w-2xl justify-end">
-          <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Buscar canal, cidade ou programa..."
-              className="w-full bg-slate-800/90 text-white placeholder-slate-400 text-lg font-medium pl-12 pr-10 py-3 rounded-2xl border border-slate-700 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 transition shadow-inner"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => onSearchChange('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            )}
-          </div>
-
-          <button
-            onClick={onOpenImport}
-            className="hidden md:flex items-center gap-2 bg-amber-400 hover:bg-amber-500 active:scale-95 text-slate-950 font-black px-5 py-3 rounded-2xl text-base transition shadow-md shadow-amber-400/10 shrink-0"
-          >
-            <PlusCircle className="w-6 h-6" />
-            <span>Importar Lista M3U</span>
-          </button>
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute top-1/2 left-4 h-6 w-6 -translate-y-1/2 text-tinta-500"
+            strokeWidth={2.5}
+          />
+          <input
+            type="search"
+            value={searchTerm}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Buscar canal"
+            aria-label="Buscar canal pelo nome"
+            className="h-toque w-full rounded-2xl border-2 border-noite-500 bg-noite-700 pr-16 pl-13 text-lg font-bold text-tinta-100 placeholder-tinta-500 transition outline-none focus:border-sol-400"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => onSearchChange('')}
+              className="absolute top-1/2 right-2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-xl text-tinta-300 transition active:scale-90 active:bg-noite-600"
+              aria-label="Limpar a busca"
+            >
+              <X className="h-6 w-6" strokeWidth={3} />
+            </button>
+          )}
         </div>
       </div>
     </header>

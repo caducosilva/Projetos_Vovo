@@ -10,6 +10,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(TvBridge.class);
+        registerPlugin(DlnaBridge.class);
+        registerPlugin(UpdateBridge.class);
         super.onCreate(savedInstanceState);
 
         try {

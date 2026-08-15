@@ -1,24 +1,114 @@
 @import "tailwindcss";
 
+/**
+ * Vovo TV: sistema visual pensado para uma pessoa idosa usar sozinha, em pe,
+ * com o celular na mao e sem oculos por perto.
+ *
+ * Tres regras que valem para tudo aqui:
+ *   1. Nada abaixo de 16px, e o que importa fica em 18px ou mais.
+ *   2. Nada clicavel menor que 56px de altura.
+ *   3. Texto claro sobre fundo escuro, sempre acima de 7:1 de contraste.
+ */
+@theme {
+  /* Fundos, do mais fundo para o mais proximo */
+  --color-noite-900: #080b11;
+  --color-noite-800: #0f141d;
+  --color-noite-700: #171e2a;
+  --color-noite-600: #232c3b;
+  --color-noite-500: #33404f;
+
+  /* Acao principal: amarelo quente, o unico tom saturado da tela */
+  --color-sol-400: #fbbf24;
+  --color-sol-500: #f0a815;
+  --color-sol-600: #c9860a;
+
+  /* Texto */
+  --color-tinta-100: #f7fafc;
+  --color-tinta-300: #c2ccd9;
+  --color-tinta-500: #8b98a9;
+
+  /* Sinais de estado */
+  --color-vivo-400: #34d399;
+  --color-alerta-400: #fbbf24;
+  --color-morto-400: #fb7185;
+
+  /* Altura minima de qualquer coisa que se toca */
+  --spacing-toque: 3.5rem;
+}
+
 @layer base {
-  html, body {
+  html,
+  body,
+  #root {
     margin: 0;
     padding: 0;
     width: 100%;
-    height: 100%;
-    background-color: #020617;
-    color: #f8fafc;
+    min-height: 100%;
+    background-color: var(--color-noite-900);
+    color: var(--color-tinta-100);
     overflow-x: hidden;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    font-size: 17px;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* O WebView do Android aumenta fonte sozinho ao girar e quebra a grade */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  button {
+    font-family: inherit;
+    touch-action: manipulation;
+  }
+
+  /* Foco visivel para quem navega de controle remoto na TV Box */
+  :focus-visible {
+    outline: 3px solid var(--color-sol-400);
+    outline-offset: 2px;
   }
 }
 
-/* Custom scrollbar */
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
+@layer utilities {
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Respeita entalhe e barra de gestos, em pe e deitado */
+  .area-segura-topo {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+  }
+  .area-segura-base {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .area-segura-lados {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Duas linhas e reticencias, para nome de canal comprido nao empurrar o card */
+  .duas-linhas {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }
-.scrollbar-none {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+
+/* Quem pediu menos animacao no sistema nao deve levar susto aqui */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

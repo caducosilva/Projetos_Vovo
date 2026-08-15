@@ -1,7 +1,13 @@
-import React from 'react';
-import { Play, Star, Tv, Radio } from 'lucide-react';
+import React, { useState } from 'react';
+import { Play, Star, Radio } from 'lucide-react';
 import type { ChannelWithHealth } from '../types';
-import { SignalBars } from './SignalBars';
+import {
+  cleanChannelName,
+  channelInitials,
+  channelColor,
+  isRadioChannel,
+  ehImagemRemovida
+} from '../utils/channelName';
 
 interface ChannelCardProps {
   channel: ChannelWithHealth;
@@ -10,117 +16,86 @@ interface ChannelCardProps {
   onToggleFavorite: (channel: ChannelWithHealth) => void;
 }
 
-export const ChannelCard: React.FC<ChannelCardProps> = React.memo(({
-  channel,
-  isFavorite,
-  onSelect,
-  onToggleFavorite
-}) => {
-  const isDead = channel.health === 'dead';
-  const isRadio = Boolean(
-    channel.isRadio ||
-    (channel.group || '').toLowerCase().includes('rádio') ||
-    (channel.group || '').toLowerCase().includes('radio') ||
-    (channel.name || '').startsWith('📻')
-  );
+/**
+ * Cartao de canal.
+ *
+ * O cartao inteiro e o botao de assistir. A estrela e o unico alvo separado, e
+ * fica no canto oposto com folga grande em volta, porque errar a estrela
+ * querendo assistir era o engano mais comum da vovo na versao anterior.
+ */
+export const ChannelCard: React.FC<ChannelCardProps> = React.memo(
+  ({ channel, isFavorite, onSelect, onToggleFavorite }) => {
+    const [logoQuebrou, setLogoQuebrou] = useState(false);
 
-  return (
-    <div
-      onClick={() => onSelect(channel)}
-      className={`group relative bg-slate-800/80 hover:bg-slate-800 border rounded-3xl p-3.5 flex flex-col justify-between gap-2.5 cursor-pointer transition-transform duration-150 active:scale-95 shadow-md overflow-hidden ${
-        isDead
-          ? 'border-rose-900/40 opacity-60'
-          : isRadio
-          ? 'border-amber-500/30 hover:border-amber-400'
-          : 'border-slate-800 hover:border-amber-400/60'
-      }`}
-    >
-      {/* Top row: Logo + Favorite button */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="w-12 h-12 bg-slate-900 rounded-2xl p-1.5 flex items-center justify-center border border-slate-700/50 shadow-inner group-hover:scale-105 transition shrink-0">
-          {channel.logo ? (
-            <img
-              src={channel.logo}
-              alt={channel.name}
-              loading="lazy"
-              className="w-full h-full object-contain"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
-          ) : isRadio ? (
-            <Radio className="w-6 h-6 text-amber-400" />
-          ) : (
-            <Tv className="w-6 h-6 text-slate-500" />
-          )}
-        </div>
+    const radio = isRadioChannel(channel);
+    const nome = cleanChannelName(channel.name);
+    const temLogo = Boolean(channel.logo) && channel.logo.startsWith('http') && !logoQuebrou;
 
-        {/* Favorite Button */}
+    return (
+      <div className="relative">
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleFavorite(channel);
-          }}
-          className={`p-2 rounded-xl transition active:scale-90 ${
-            isFavorite
-              ? 'bg-amber-400/20 text-amber-400'
-              : 'text-slate-400 hover:text-white bg-slate-800/60'
-          }`}
-          title={isFavorite ? 'Remover dos Favoritos' : 'Adicionar aos Favoritos'}
+          onClick={() => onSelect(channel)}
+          className="flex w-full flex-col gap-3 rounded-3xl border-2 border-noite-600 bg-noite-700 p-3 text-left transition active:scale-95 active:border-sol-400"
+          aria-label={`Assistir ${nome}`}
         >
-          <Star className={`w-4 h-4 ${isFavorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+          {/* Marca do canal: logo real, ou as iniciais em cor fixa quando nao tem */}
+          <div className="flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-2xl bg-noite-800">
+            {temLogo ? (
+              <img
+                src={channel.logo}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-contain p-2"
+                onError={() => setLogoQuebrou(true)}
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (ehImagemRemovida(img.naturalWidth, img.naturalHeight)) {
+                    setLogoQuebrou(true);
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className="flex h-full w-full items-center justify-center text-4xl font-black tracking-tight text-white sm:text-5xl"
+                style={{ backgroundColor: channelColor(channel.url || nome) }}
+                aria-hidden="true"
+              >
+                {channelInitials(nome)}
+              </span>
+            )}
+          </div>
+
+          <h3 className="duas-linhas min-h-[2.7rem] text-lg leading-snug font-black text-tinta-100">
+            {nome}
+          </h3>
+
+          <span className="flex h-toque items-center justify-center gap-2 rounded-2xl bg-sol-400 text-xl font-black text-noite-900">
+            {radio ? <Radio className="h-6 w-6" strokeWidth={2.5} /> : <Play className="h-6 w-6 fill-current" />}
+            {radio ? 'Ouvir' : 'Assistir'}
+          </span>
+        </button>
+
+        {/* Fora do botao principal para o toque nao vazar de um para o outro */}
+        <button
+          onClick={() => onToggleFavorite(channel)}
+          className={`absolute top-2 right-2 flex h-14 w-14 items-center justify-center rounded-2xl border-2 transition active:scale-90 ${
+            isFavorite
+              ? 'border-sol-400 bg-sol-400 text-noite-900'
+              : 'border-noite-500 bg-noite-900/85 text-tinta-300'
+          }`}
+          aria-label={isFavorite ? `Tirar ${nome} dos favoritos` : `Guardar ${nome} nos favoritos`}
+          aria-pressed={isFavorite}
+        >
+          <Star className={`h-7 w-7 ${isFavorite ? 'fill-current' : ''}`} strokeWidth={2.5} />
         </button>
       </div>
+    );
+  },
+  (anterior, novo) =>
+    anterior.channel.url === novo.channel.url &&
+    anterior.channel.name === novo.channel.name &&
+    anterior.isFavorite === novo.isFavorite
+);
 
-      {/* Middle: Channel Name & Category */}
-      <div className="flex-1 flex flex-col justify-center min-w-0">
-        <h3 className="text-white text-sm sm:text-base font-black truncate leading-snug group-hover:text-amber-300 transition">
-          {channel.name}
-        </h3>
-        <p className="text-slate-400 text-[11px] font-bold mt-0.5 truncate">
-          {channel.group || (isRadio ? 'Rádio ao Vivo' : 'Canais Abertos')}
-        </p>
-      </div>
-
-      {/* Força do sinal e botão assistir sem vazar da grade */}
-      <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-1.5 overflow-hidden">
-        <div className="flex items-center gap-1 shrink-0">
-          <SignalBars
-            score={channel.signalStrength}
-            status={channel.health}
-            latencyMs={channel.latencyMs}
-            compact
-            showText={false}
-          />
-          <span className="text-[10px] font-bold text-slate-400 truncate max-w-[45px]">
-            {channel.latencyMs
-              ? `${channel.latencyMs}ms`
-              : isDead
-              ? 'off'
-              : '—'}
-          </span>
-        </div>
-
-        <span
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-xl font-black text-[11px] transition shadow shrink-0 ${
-            isDead
-              ? 'bg-slate-700 text-slate-300'
-              : isRadio
-              ? 'bg-amber-500 text-slate-950 group-hover:bg-amber-400'
-              : 'bg-amber-400 text-slate-950 group-hover:bg-amber-300'
-          }`}
-        >
-          {isRadio ? <Radio className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
-          {isDead ? 'Tentar' : isRadio ? 'Ouvir' : 'Assistir'}
-        </span>
-      </div>
-    </div>
-  );
-}, (prev, next) => {
-  return (
-    prev.channel.url === next.channel.url &&
-    prev.channel.health === next.channel.health &&
-    prev.channel.signalStrength === next.channel.signalStrength &&
-    prev.isFavorite === next.isFavorite
-  );
-});
+ChannelCard.displayName = 'ChannelCard';
