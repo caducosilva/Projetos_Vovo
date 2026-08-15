@@ -21,10 +21,21 @@ android/capacitor-cordova-android-plugins/
 __pycache__/
 *.pyc
 
-# Streams das cameras (gerado em tempo real)
+# Segredos
+*.env
+.env.local
+credentials*.json
+*token*.json
+*api*key*.json
+cookies/
+
+# Streams das cameras, gerados em tempo real.
+# Recortado na pasta de proposito: "*.ts" solto engolia todo arquivo
+# TypeScript do projeto, e os dois apps ficaram sem vite.config.ts,
+# sem capacitor.config.ts e sem a pasta src/utils inteira dentro do repo.
 stream/
-*.m3u8
-*.ts
+**/stream/*.ts
+**/stream/*.m3u8
 
 # Logs e temporarios
 *.log
@@ -46,7 +57,10 @@ APKs_Prontos/
 # Visualizador de cameras vive no repositorio privado CameraLocal
 cameras-vovo/
 
-# Capturas de tela de depuracao
-*.png
-!**/src/assets/**
-!**/public/**
+# Capturas de tela de depuracao soltas na raiz
+/*.png
+
+# Capturas tiradas durante o desenvolvimento (phone_screen_radio_test1.png e
+# companhia). Sao 8 MB de tela antiga, de um design que ja foi substituido, e
+# entram no repo so para envelhecer. Ficam no disco, fora do historico.
+docs/screenshots/
