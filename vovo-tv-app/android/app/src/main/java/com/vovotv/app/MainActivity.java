@@ -23,6 +23,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(TvBridge.class);
         registerPlugin(DlnaBridge.class);
+        registerPlugin(CastBridge.class);
         registerPlugin(UpdateBridge.class);
         super.onCreate(savedInstanceState);
 

@@ -80,7 +80,9 @@ export function getChannelCategory(channel: Channel): CategoryKey[] {
     combined.includes('diario') ||
     combined.includes('diário') ||
     combined.includes('são paulo') ||
-    combined.includes('sp') ||
+    // "sp" solto, nao o "sp" de ESPN nem o de esporte: com as listas do PC
+    // dentro do app isso jogava centenas de canais para dentro de "TV SP".
+    /sp/.test(combined) ||
     combined.includes('paulista') ||
     combined.includes('gazeta') ||
     combined.includes('jundiai') ||

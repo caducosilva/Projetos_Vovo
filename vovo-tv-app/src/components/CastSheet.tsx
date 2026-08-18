@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Cast, Tv, RotateCcw, AlertTriangle, Square, Loader2 } from 'lucide-react';
-import { dlna, castCompatibility, type DlnaDevice } from '../utils/dlna';
+import {
+  procurarTvs,
+  mandarParaTv,
+  pararNaTv,
+  avisarFormato,
+  type TvNaRede
+} from '../utils/tvsDaCasa';
 import { cleanChannelName } from '../utils/channelName';
 import { Sheet } from './Sheet';
 
@@ -9,36 +15,38 @@ interface CastSheetProps {
   channelName: string;
   channelUrl: string;
   onClose: () => void;
+  /** Chamado quando a TV aceitou o canal, para o celular parar de tocar junto. */
+  onFoiParaTv?: () => void;
 }
 
 type Estado =
   | { fase: 'procurando' }
-  | { fase: 'lista'; aparelhos: DlnaDevice[] }
+  | { fase: 'lista'; aparelhos: TvNaRede[] }
   | { fase: 'enviando'; nome: string }
-  | { fase: 'tocando'; nome: string; deviceId: string }
+  | { fase: 'tocando'; nome: string; tv: TvNaRede }
   | { fase: 'erro'; mensagem: string };
 
 /**
  * Espelhar o canal numa TV da mesma rede Wi-Fi.
  *
- * Toda a conversa DLNA acontece no plugin nativo; aqui so existe a tela. O
- * texto evita "DLNA", "renderer" e "transmitir": para a vovo isso e "mandar
- * para a TV".
+ * Toda a conversa com a TV (Chromecast ou DLNA) acontece nos plugins nativos;
+ * aqui so existe a tela. O texto evita "DLNA", "renderer" e "transmitir": para
+ * a vovo isso e "mandar para a TV".
  */
 export const CastSheet: React.FC<CastSheetProps> = ({
   isOpen,
   channelName,
   channelUrl,
-  onClose
+  onClose,
+  onFoiParaTv
 }) => {
   const [estado, setEstado] = useState<Estado>({ fase: 'procurando' });
   const nomeCanal = cleanChannelName(channelName);
-  const compatibilidade = castCompatibility(channelUrl);
 
   const procurar = useCallback(async () => {
     setEstado({ fase: 'procurando' });
     try {
-      const aparelhos = await dlna.discover(5000);
+      const aparelhos = await procurarTvs(5000);
       setEstado({ fase: 'lista', aparelhos });
     } catch (error) {
       setEstado({
@@ -53,11 +61,12 @@ export const CastSheet: React.FC<CastSheetProps> = ({
     if (isOpen) procurar();
   }, [isOpen, procurar]);
 
-  const enviar = async (aparelho: DlnaDevice) => {
+  const enviar = async (aparelho: TvNaRede) => {
     setEstado({ fase: 'enviando', nome: aparelho.name });
     try {
-      await dlna.cast(aparelho.id, channelUrl, nomeCanal);
-      setEstado({ fase: 'tocando', nome: aparelho.name, deviceId: aparelho.id });
+      await mandarParaTv(aparelho, channelUrl, nomeCanal);
+      setEstado({ fase: 'tocando', nome: aparelho.name, tv: aparelho });
+      onFoiParaTv?.();
     } catch (error) {
       setEstado({
         fase: 'erro',
@@ -66,9 +75,9 @@ export const CastSheet: React.FC<CastSheetProps> = ({
     }
   };
 
-  const parar = async (deviceId: string) => {
+  const parar = async (tv: TvNaRede) => {
     try {
-      await dlna.stop(deviceId);
+      await pararNaTv(tv);
     } catch {
       /* a TV pode ter sido desligada na mao; parar mesmo assim na tela */
     }
@@ -77,7 +86,9 @@ export const CastSheet: React.FC<CastSheetProps> = ({
 
   return (
     <Sheet isOpen={isOpen} title="Mandar para a TV" subtitle={nomeCanal} onClose={onClose}>
-      {compatibilidade === 'duvidosa' && estado.fase === 'lista' && (
+      {estado.fase === 'lista' &&
+        estado.aparelhos.length > 0 &&
+        estado.aparelhos.every((tv) => avisarFormato(tv, channelUrl)) && (
         <div className="mb-4 flex gap-3 rounded-2xl border-2 border-alerta-400/40 bg-alerta-400/10 p-4">
           <AlertTriangle className="h-7 w-7 shrink-0 text-alerta-400" strokeWidth={2.5} />
           <p className="text-base leading-snug font-bold text-tinta-100">
@@ -114,7 +125,7 @@ export const CastSheet: React.FC<CastSheetProps> = ({
             <p className="mt-1 text-base text-tinta-300">Você já pode guardar o celular.</p>
           </div>
           <button
-            onClick={() => parar(estado.deviceId)}
+            onClick={() => parar(estado.tv)}
             className="flex h-toque items-center gap-2 rounded-2xl bg-morto-400 px-6 text-xl font-black text-noite-900 transition active:scale-95"
           >
             <Square className="h-6 w-6 fill-current" />

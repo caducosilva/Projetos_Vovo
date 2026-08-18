@@ -27,12 +27,17 @@ login e nenhum anúncio.
 
 ### Vovó TV Brasil (`vovo-tv-app`)
 
-TV ao vivo com mais de 750 canais abertos e regionais do Brasil e da América
-Latina, entre eles TV Diário de Mogi das Cruzes, Globo SP, SBT, Record, Band,
-Cultura, RedeTV, Aparecida, Canção Nova e os canais de notícias.
+TV ao vivo com cerca de 2.400 canais abertos, regionais e por assinatura,
+entre eles TV Diário de Mogi das Cruzes, Globo SP, SBT, Record, Band, Cultura,
+RedeTV, Aparecida, Canção Nova, esportes, infantis e os canais de notícias. A
+lista sai das mesmas playlists M3U que rodam no computador da casa, trazidas
+pelo `tools/importar_canais_pc.py`, que testa o sinal de cada canal antes de
+deixar ele entrar.
 
-- **Espelhar na TV pelo Wi-Fi (DLNA).** Um toque em "TV" procura as televisões
-  da casa e manda o canal para lá. Sem cabo, sem Chromecast, sem conta.
+- **Mandar o canal para a TV pelo Wi-Fi.** Um toque em "TV" procura as
+  televisões da casa pelos dois caminhos ao mesmo tempo, Chromecast e DLNA, e
+  manda o canal para lá. Sem cabo e sem conta. Quando a TV aceita, o celular
+  para de tocar sozinho, para o som não sair dobrado.
 - **Atualização pelo próprio app.** Quando sai uma versão nova, o app avisa,
   baixa e chama o instalador. A vovó só toca em "Atualizar agora".
 - Filtros por tema: abertos nacionais, São Paulo e Mogi das Cruzes, religiosos,
@@ -139,6 +144,28 @@ O número em milissegundos, a contagem de "bons e fracos" e o botão de testar n
 mão viviam na tela inicial e empurravam o primeiro canal para fora dela. Hoje
 tudo isso mora em Ajustes, que é onde quem cuida do app precisa, e não ela.
 
+### Mandar para a TV: Chromecast e DLNA
+
+Por muito tempo só existia o caminho DLNA aqui, e o botão "TV" simplesmente não
+funcionava na casa. O motivo é que a TV da sala é uma Philips com **Chromecast
+embutido**: ela não expõe `AVTransport` nenhum, então a busca SSDP achava só o
+Xbox e nunca a televisão. O `CastBridge` resolve isso falando Google Cast, o
+mesmo protocolo que o painel do PC já usava com sucesso nessa TV.
+
+Três coisas desse plugin merecem ficar escritas:
+
+- Quem procura os aparelhos é o Play Services, e ele só começa depois que o app
+  pede o `CastContext` pelo menos uma vez. Sem essa primeira chamada o
+  `MediaRouter` devolve lista vazia mesmo com a TV ligada.
+- Tudo que é Cast exige a thread principal. A parte de rede (baixar a playlist)
+  roda fora dela, e as duas conversam pelo `Handler` do main looper.
+- O receptor padrão do Chromecast engasga com master playlist de canal ao vivo:
+  fica em buffer eterno e a tela não mostra nada. O plugin lê a playlist antes,
+  escolhe a variante de maior banda e manda essa. Foi o que fez funcionar.
+
+O DLNA continua no app para aparelho que só tem ele, e a tela mostra os dois
+tipos numa lista só: a vovó escolhe a TV pelo nome, não pelo protocolo.
+
 ### Espelhamento DLNA
 
 O WebView do Android não abre socket UDP, e a descoberta de TVs na rede é SSDP,
@@ -226,10 +253,12 @@ simplesmente segue funcionando.
 ```
 vovo-tv-app/              app de TV ao vivo
 ├── src/components/       grade, player, painéis de tela cheia
-├── src/utils/            nomes, categorias, saúde, DLNA, atualizador
+├── src/utils/            nomes, categorias, saúde, TVs da casa, atualizador
 ├── src/data/             lista de canais padrão
 ├── android/.../TvBridge.java      brilho, volume, rotação, tela acesa
 ├── android/.../DlnaBridge.java    descoberta SSDP e controle AVTransport
+├── android/.../CastBridge.java    Google Cast (Chromecast embutido da TV)
+├── tools/importar_canais_pc.py    traz as listas M3U do PC para o app
 ├── android/.../UpdateBridge.java  download do APK e chamada do instalador
 └── update.json           manifesto de versão lido pelo app
 radios-vovo-app/          app de rádio

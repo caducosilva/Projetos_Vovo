@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import type { Channel, ChannelWithHealth } from '../types';
 import { tv, isNative } from '../utils/tvBridge';
-import { dlna } from '../utils/dlna';
+import { podeMandarParaTv } from '../utils/tvsDaCasa';
 import { ehCanalDeCamera } from '../utils/cameras';
 import { cleanChannelName, isRadioChannel } from '../utils/channelName';
 import { CastSheet } from './CastSheet';
@@ -382,6 +382,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, []);
 
+  /**
+   * Canal aceito pela TV: o celular cala a boca.
+   *
+   * Sem isto o mesmo jogo toca nos dois aparelhos com meio segundo de
+   * diferenca, o eco confunde a vovo e ainda gasta a internet duas vezes.
+   */
+  const pausarPorCausaDaTv = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    setTocando(false);
+  }, []);
+
   const alternarPlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -685,7 +698,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         <div className="flex-1" />
 
-        {dlna.available && !radio && (
+        {podeMandarParaTv && !radio && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -859,6 +872,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         channelName={channel.name}
         channelUrl={channel.url}
         onClose={() => setCastAberto(false)}
+        onFoiParaTv={pausarPorCausaDaTv}
       />
     </div>
   );
