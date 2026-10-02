@@ -1,4 +1,4 @@
-# Receptor DLNA do Inicio (EM ANDAMENTO)
+# Receptor DLNA do Inicio (funcionando, faltam testes de standby e reboot)
 
 A TV Philips 50PUG7907/78 nao tem DLNA nenhum de fabrica (so anuncia Chromecast).
 O Inicio agora traz um receptor DLNA proprio, sempre ligado, que aparece nos
@@ -22,8 +22,17 @@ adb shell appops set com.tvdavovo.inicio SYSTEM_ALERT_WINDOW allow   # abrir vid
 adb shell dumpsys deviceidle whitelist +com.tvdavovo.inicio
 ```
 
-## Estado (2026-10-02 19:45)
-- FEITO: v1.1.0 compilada e instalada na TV; log mostra "ouvindo na porta 49494", "SSDP ouvindo", servico isForeground=true.
-- FALTA: rodar `tools/celular_falso.py` (faz papel do celular: busca, MP4, MKV AC3, foto, MP3, pausa, seek, volume, eventos). Midias de teste sao geradas com ffmpeg numa pasta `midia/` ao lado do script.
-- FALTA: testar TV em repouso (standby) recebendo video.
-- FALTA: documentar no README raiz.
+## Testes (2026-10-02 19:44, `tools/celular_falso.py`, PC fazendo papel de celular)
+Tudo OK, 30 de 30 checagens:
+- busca SSDP acha "TV da Vovó" em http://192.168.0.12:49494/desc.xml; SCPDs com 15/6/3 acoes
+- MP4 1080p toca, posicao anda, Pause congela, Seek para 0:25 funciona
+- MKV com audio AC3 5.1 toca (o caso que trava no Chromecast via VLC)
+- foto 4000x3000 aparece reduzida; MP3 toca
+- volume 32 -> 7 -> 32 pelo celular
+- Stop volta a TV para o Inicio
+- eventos GENA chegam: PLAYING, PAUSED_PLAYBACK, STOPPED
+Prints conferidos a olho. Obs.: o `screencap` dessa TV imprime uma linha de debug antes do PNG; cortar ate `PNG`.
+
+## Falta
+- testar TV em repouso (standby) recebendo video
+- testar que o receptor volta sozinho depois de reiniciar a TV
