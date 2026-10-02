@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import defaultChannelsData from './data/default_channels.json';
-import type { Channel, ChannelWithHealth, CategoryKey } from './types';
-import { getChannelCategory, CATEGORIES } from './utils/categories';
+import type { Channel, ChannelWithHealth } from './types';
 import {
   loadHealth,
   saveHealth,
@@ -9,17 +8,16 @@ import {
   markConfirmed,
   markPlaybackFail,
   runBatchProbe,
-  signalScore,
-  isStale,
-  emptyEntry
+  isStale
 } from './utils/health';
 import type { HealthMap, ProbeResult } from './utils/health';
 import { checkForUpdate, type AvailableUpdate } from './utils/updater';
-import { dedupe, migrarFavoritos } from './utils/channelList';
+import { dedupe } from './utils/channelList';
+import { fontesDoCanal, saudeDoCanal, compararPorNome } from './utils/fontes';
 import { buscarCanaisDeCamera, ehCanalDeCamera } from './utils/cameras';
+import { tv } from './utils/tvBridge';
+import { App as CapacitorApp } from '@capacitor/app';
 import { Header } from './components/Header';
-import { CategoryBar } from './components/CategoryBar';
-import { CategorySheet } from './components/CategorySheet';
 import { ChannelCard } from './components/ChannelCard';
 import { VideoPlayer } from './components/VideoPlayer';
 import { SettingsSheet } from './components/SettingsSheet';
@@ -28,7 +26,27 @@ import { SearchX, Plus } from 'lucide-react';
 
 const PROBE_WORKERS = 4;
 const PROBE_LOTE = 60;
-const PAGINA = 40;
+// Todos os canais de uma vez: sem botao de "mostrar mais" na tela da vovo
+const PAGINA = 500;
+const COLS = 5;
+
+/**
+ * Ordem da grade, igual a do painel do PC:
+ *   1. cameras de casa (o que a vovo mais abre)
+ *   2. canais abertos, de A a Z
+ *   3. canais do Pluto TV, de A a Z
+ *
+ * Antes a fila era por sinal medido, entao a mesma grade mudava de lugar a
+ * cada teste de saude e a vovo perdia a referencia de onde o canal estava.
+ */
+const CONHECIDAS = ['globo', 'record', 'sbt', 'band', 'redetv'];
+
+function blocoDoCanal(canal: Channel): number {
+  if (ehCanalDeCamera(canal)) return 0;
+  const nome = (canal.name || '').toLowerCase();
+  if (CONHECIDAS.some((marca) => nome.includes(marca))) return 1;
+  return 2;
+}
 
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>(() => {
@@ -41,51 +59,89 @@ export default function App() {
     }
   });
 
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    try {
-      const salvo = localStorage.getItem('vovo_tv_favorites');
-      return migrarFavoritos(salvo ? JSON.parse(salvo) : [], channels);
-    } catch {
-      return [];
-    }
-  });
-
   const [health, setHealth] = useState<HealthMap>(() => loadHealth());
   const healthRef = useRef<HealthMap>(health);
   const [probeState, setProbeState] = useState({ running: false, done: 0, total: 0 });
   const pararRef = useRef(false);
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<CategoryKey>('abertos');
   const [visibleCount, setVisibleCount] = useState(PAGINA);
 
+  // Navegacao D-Pad precisa para Smart TV
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const [topNav, setTopNav] = useState<'none' | 'settings'>('none');
+
   const [activeChannel, setActiveChannel] = useState<ChannelWithHealth | null>(null);
-  /**
-   * Lista congelada no momento em que o canal abre.
-   *
-   * A lista da grade se reordena sozinha conforme o teste de sinal chega. Se o
-   * player usasse ela ao vivo, "proximo canal" pularia para um lugar aleatorio
-   * no meio da novela. O congelamento mantem a ordem estavel ate fechar.
-   */
   const [playerList, setPlayerList] = useState<ChannelWithHealth[]>([]);
 
-  const [categoriaAberta, setCategoriaAberta] = useState(false);
   const [ajustesAbertos, setAjustesAbertos] = useState(false);
   const [atualizacao, setAtualizacao] = useState<AvailableUpdate | null>(null);
 
+  // Smart TV (sem toque, controlada por controle remoto) x celular
+  const [souTv, setSouTv] = useState(false);
   useEffect(() => {
-    setVisibleCount(PAGINA);
-  }, [selectedCategory, searchTerm]);
+    tv.getDeviceType().then((resultado) => {
+      if (resultado?.isTv) setSouTv(true);
+    });
+  }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('vovo_tv_favorites', JSON.stringify(favorites));
-    } catch {
-      /* sem espaco em disco: os favoritos seguem valendo nesta sessao */
+  // Sair do app com duplo clique em Voltar / ESC
+  const ultimoVoltarRef = useRef<number>(0);
+  const [avisoSair, setAvisoSair] = useState(false);
+  const avisoSairTimerRef = useRef<number | null>(null);
+
+  const tentarSairDoApp = useCallback(() => {
+    const agora = Date.now();
+    if (agora - ultimoVoltarRef.current < 2200) {
+      // So um jeito de sair: tv.exitApp() (finishAffinity) ja fecha tudo e
+      // volta pro launcher da TV. Chamar CapacitorApp.exitApp() em seguida
+      // brigava com a mesma activity ja em finalizacao e deixava o app
+      // preso na tela, sem sair de verdade.
+      tv.exitApp();
+    } else {
+      ultimoVoltarRef.current = agora;
+      setAvisoSair(true);
+      if (avisoSairTimerRef.current !== null) window.clearTimeout(avisoSairTimerRef.current);
+      avisoSairTimerRef.current = window.setTimeout(() => setAvisoSair(false), 2000);
     }
-  }, [favorites]);
+  }, []);
 
-  // Grava a saude no ref na hora e joga pra tela em lotes
+  // Fecha modais ou sai do app ao apertar Voltar 2x no controle remoto ou ESC no teclado
+  useEffect(() => {
+    const handleGlobalBack = (e: KeyboardEvent) => {
+      if (activeChannel) return;
+
+      if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack') {
+        e.preventDefault();
+        if (ajustesAbertos) {
+          setAjustesAbertos(false);
+        } else {
+          tentarSairDoApp();
+        }
+      }
+    };
+
+    let cancelado = false;
+    let remover: (() => void) | null = null;
+    CapacitorApp.addListener('backButton', () => {
+      if (activeChannel) return;
+      if (ajustesAbertos) {
+        setAjustesAbertos(false);
+      } else {
+        tentarSairDoApp();
+      }
+    }).then((h) => {
+      if (cancelado) h.remove();
+      else remover = () => h.remove();
+    }).catch(() => undefined);
+
+    window.addEventListener('keydown', handleGlobalBack);
+    return () => {
+      cancelado = true;
+      if (remover) remover();
+      window.removeEventListener('keydown', handleGlobalBack);
+    };
+  }, [ajustesAbertos, activeChannel, tentarSairDoApp]);
+
   const flushTimerRef = useRef<number | null>(null);
   const commitHealth = useCallback((proximo: HealthMap) => {
     healthRef.current = proximo;
@@ -156,10 +212,9 @@ export default function App() {
     setProbeState((anterior) => ({ ...anterior, running: false }));
   }, []);
 
-  /** Canais que nunca foram testados ou cujo teste ja envelheceu. */
   const urlsPendentes = useCallback(() => {
     return channels
-      .map((c) => c.url)
+      .flatMap((c) => fontesDoCanal(c))
       .filter((url) => {
         const entrada = healthRef.current[url];
         return !entrada || entrada.status !== 'confirmed' || isStale(entrada);
@@ -168,41 +223,64 @@ export default function App() {
 
   const handleStartProbe = useCallback(() => {
     const pendentes = urlsPendentes();
-    const alvo = pendentes.length > 0 ? pendentes : channels.map((c) => c.url);
+    const alvo = pendentes.length > 0 ? pendentes : channels.flatMap((c) => fontesDoCanal(c));
     startProbe(alvo.slice(0, PROBE_LOTE));
   }, [channels, startProbe, urlsPendentes]);
 
   /**
-   * Teste automatico ao abrir.
+   * Testa os canais sozinho, em segundo plano, sem a vovo precisar pedir.
    *
-   * A vovo nao deve precisar apertar "verificar sinal": o app testa sozinho e
-   * usa o resultado so para ordenar a grade. O atraso deixa a primeira tela
-   * desenhar antes de disputar a rede.
+   * Primeiro teste 2.5s depois de abrir o app; depois disso, de tempos em
+   * tempos, revê os que ficaram "velhos" (STALE_MINUTES) ou nunca foram
+   * confirmados. Canal marcado como morto some da grade sozinho, porque
+   * filteredChannels ja esconde health === 'dead'. Nada disso aparece na
+   * tela: so roda quieto, a nao ser que a vovo abra os Ajustes.
    */
   useEffect(() => {
-    const agendado = window.setTimeout(() => {
+    const rodarSeTiverPendente = () => {
       const pendentes = urlsPendentes();
       if (pendentes.length > 0) startProbe(pendentes.slice(0, PROBE_LOTE));
-    }, 2500);
-    return () => window.clearTimeout(agendado);
-    // Roda uma vez por abertura do app, de proposito.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    };
+
+    const primeiro = window.setTimeout(rodarSeTiverPendente, 2500);
+    const periodico = window.setInterval(rodarSeTiverPendente, 30 * 60_000);
+    return () => {
+      window.clearTimeout(primeiro);
+      window.clearInterval(periodico);
+    };
+  }, [urlsPendentes, startProbe]);
+
+  /**
+   * Ajustes sem botao na tela: o zero apertado tres vezes seguidas abre.
+   * O botao de engrenagem saiu porque a vovo clicava nele sem querer e caia
+   * numa tela que nao tem nada para ela fazer.
+   */
+  useEffect(() => {
+    let contador = 0;
+    let ultimo = 0;
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key !== '0') {
+        contador = 0;
+        return;
+      }
+      const agora = Date.now();
+      contador = agora - ultimo < 1500 ? contador + 1 : 1;
+      ultimo = agora;
+      if (contador >= 3) {
+        contador = 0;
+        setAjustesAbertos(true);
+      }
+    };
+    window.addEventListener('keydown', aoTeclar);
+    return () => window.removeEventListener('keydown', aoTeclar);
   }, []);
 
-  // Procura versao nova em segundo plano; falhar aqui nunca incomoda a vovo
   useEffect(() => {
     checkForUpdate().then((nova) => {
       if (nova) setAtualizacao(nova);
     });
   }, []);
 
-  /**
-   * Cameras de casa.
-   *
-   * A lista vem do servidor que roda no computador, entao ela e recarregada de
-   * tempos em tempos: se o computador estava desligado quando o app abriu, os
-   * canais aparecem sozinhos assim que ele voltar, sem a vovo fazer nada.
-   */
   const carregarCameras = useCallback(async (sinal?: AbortSignal) => {
     const cameras = await buscarCanaisDeCamera(sinal);
     setChannels((anterior) => {
@@ -210,7 +288,6 @@ export default function App() {
       const iguais =
         cameras.length === anterior.length - semCameras.length &&
         cameras.every((cam) => anterior.some((c) => c.url === cam.url));
-      // Sem mudanca real nao troca o estado, senao a grade repinta a cada minuto
       if (iguais) return anterior;
       return dedupe([...cameras, ...semCameras]);
     });
@@ -226,33 +303,16 @@ export default function App() {
     };
   }, [carregarCameras]);
 
-  const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
-
-  const isFavorite = useCallback(
-    (canal: Channel) => favoriteSet.has((canal.url || '').trim()),
-    [favoriteSet]
-  );
-
-  const handleToggleFavorite = useCallback((canal: Channel) => {
-    const chave = (canal.url || '').trim();
-    if (!chave) return;
-    setFavorites((anterior) =>
-      anterior.includes(chave) ? anterior.filter((u) => u !== chave) : [...anterior, chave]
-    );
-  }, []);
-
   const handleImportChannels = useCallback((novos: Channel[]) => {
     setChannels((anterior) => {
       const unicos = dedupe([...novos, ...anterior]);
       try {
-        // Camera fica de fora: ela e montada a partir do servidor a cada
-        // abertura, e gravar aqui deixaria camera antiga presa na lista.
         localStorage.setItem(
           'vovo_tv_custom_channels',
           JSON.stringify(unicos.filter((c) => c.isCustom && !ehCanalDeCamera(c)))
         );
       } catch {
-        /* sem espaco: os canais valem nesta sessao */
+        /* sem espaco */
       }
       return unicos;
     });
@@ -260,39 +320,17 @@ export default function App() {
 
   const enrichedChannels = useMemo<ChannelWithHealth[]>(() => {
     return channels.map((canal) => {
-      const entrada = health[canal.url];
-      const nota = entrada ? (entrada.signal ?? signalScore(entrada)) : signalScore(emptyEntry());
+      // vale a MELHOR fonte do canal: com cinco URLs, quatro mortas nao
+      // derrubam o canal da grade enquanto uma ainda tocar
+      const saude = saudeDoCanal(canal, health);
       return {
         ...canal,
-        health: entrada?.status ?? 'unknown',
-        signalStrength: nota,
-        latencyMs: entrada?.latency_ms
+        health: saude.status,
+        signalStrength: saude.signal,
+        latencyMs: saude.latencyMs
       };
     });
   }, [channels, health]);
-
-  const categoryCounts = useMemo(() => {
-    const contagem: Record<string, number> = {
-      todos: channels.length,
-      brasil: 0,
-      latam: 0,
-      favoritos: 0
-    };
-
-    for (const canal of channels) {
-      const pais = (canal.country || 'br').toLowerCase();
-      if (pais === 'br') contagem.brasil++;
-      else contagem.latam++;
-
-      if (favoriteSet.has(canal.url)) contagem.favoritos++;
-
-      for (const categoria of getChannelCategory(canal)) {
-        contagem[categoria] = (contagem[categoria] || 0) + 1;
-      }
-    }
-
-    return contagem;
-  }, [channels, favoriteSet]);
 
   const healthCounts = useMemo(() => {
     let ok = 0;
@@ -308,45 +346,21 @@ export default function App() {
     return { ok, doubt, dead, untested };
   }, [enrichedChannels]);
 
-  /**
-   * Lista da grade: filtra, esconde o que ja provou estar morto e ordena pelo
-   * sinal. Canal sem sinal so aparece se for favorito, senao a vovo abre a
-   * pasta de favoritos e nao acha o que guardou.
-   */
   const filteredChannels = useMemo<ChannelWithHealth[]>(() => {
-    const busca = searchTerm.trim().toLowerCase();
-
     const saida = enrichedChannels.filter((canal) => {
-      if (busca) {
-        return (
-          (canal.name || '').toLowerCase().includes(busca) ||
-          (canal.group || '').toLowerCase().includes(busca)
-        );
-      }
-
-      // Camera nunca some da grade. Se o computador estiver desligado ela seria
-      // marcada como morta e sumiria, e a vovo nao teria como saber que existe
-      // nem quando voltasse. Melhor mostrar e explicar ao tocar.
-      if (canal.health === 'dead' && !isFavorite(canal) && !ehCanalDeCamera(canal)) return false;
-
-      if (selectedCategory === 'todos') return true;
-      if (selectedCategory === 'brasil') return (canal.country || 'br').toLowerCase() === 'br';
-      if (selectedCategory === 'latam') return (canal.country || 'br').toLowerCase() !== 'br';
-      if (selectedCategory === 'favoritos') return isFavorite(canal);
-
-      return getChannelCategory(canal).includes(selectedCategory);
+      if (canal.health === 'dead' && !ehCanalDeCamera(canal)) return false;
+      return true;
     });
 
     saida.sort((a, b) => {
-      if (b.signalStrength !== a.signalStrength) return b.signalStrength - a.signalStrength;
-      const latenciaA = a.latencyMs ?? 99_999;
-      const latenciaB = b.latencyMs ?? 99_999;
-      if (latenciaA !== latenciaB) return latenciaA - latenciaB;
-      return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+      const blocoA = blocoDoCanal(a);
+      const blocoB = blocoDoCanal(b);
+      if (blocoA !== blocoB) return blocoA - blocoB;
+      return compararPorNome(a, b);
     });
 
     return saida;
-  }, [enrichedChannels, searchTerm, selectedCategory, isFavorite]);
+  }, [enrichedChannels]);
 
   const visibleChannels = useMemo(
     () => filteredChannels.slice(0, visibleCount),
@@ -360,6 +374,25 @@ export default function App() {
     },
     [filteredChannels]
   );
+
+  /**
+   * Liga ja num canal, sem passar pela grade.
+   *
+   * A vovo liga a TV e a Globo aparece; para trocar e so cima e baixo. A grade
+   * continua existindo atras (o Voltar leva ate ela), mas ninguem precisa
+   * passar por ela para assistir.
+   */
+  const jaAbriuSozinhoRef = useRef(false);
+  useEffect(() => {
+    if (jaAbriuSozinhoRef.current || filteredChannels.length === 0) return;
+    jaAbriuSozinhoRef.current = true;
+    // Procura a Globo na lista INTEIRA, nao na filtrada: um "morto" antigo no
+    // mapa de saude escondia a Globo da grade e o app abria noutro canal. Se
+    // uma fonte dela estiver fora, o proprio player cai para a seguinte.
+    const globo = enrichedChannels.find((c) => /globo/i.test(c.name || ''));
+    abrirCanal(globo ?? filteredChannels[0]);
+  }, [enrichedChannels, filteredChannels, abrirCanal]);
+
 
   const indiceAtual = useMemo(() => {
     if (!activeChannel) return -1;
@@ -375,47 +408,123 @@ export default function App() {
     [indiceAtual, playerList]
   );
 
-  const rotuloCategoria = useMemo(() => {
-    if (searchTerm.trim()) return `Busca: ${searchTerm.trim()}`;
-    return CATEGORIES.find((c) => c.key === selectedCategory)?.label ?? 'Canais';
-  }, [selectedCategory, searchTerm]);
+  // Rola o item em foco para a visualizacao na grade
+  useEffect(() => {
+    if (!activeChannel && !ajustesAbertos) {
+      if (topNav === 'none') {
+        const card = document.querySelector<HTMLElement>(`[data-card-index="${focusedIndex}"]`);
+        if (card) {
+          card.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+        }
+      }
+    }
+  }, [focusedIndex, topNav, activeChannel, ajustesAbertos]);
+
+  // Navegacao D-Pad 100% Precisa para Smart TV
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (activeChannel || ajustesAbertos) return;
+
+      if (topNav !== 'none') {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setTopNav('none');
+          setFocusedIndex(0);
+        } else if (e.key === 'Enter' || e.key === ' ' || e.key === 'Select') {
+          e.preventDefault();
+          setAjustesAbertos(true);
+        }
+        return;
+      }
+
+      const total = filteredChannels.length;
+      if (total === 0) return;
+
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = prev + 1;
+          if (next < total) {
+            if (next >= visibleCount) setVisibleCount((c) => c + 30);
+            return next;
+          }
+          return prev;
+        });
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setFocusedIndex((prev) => Math.max(0, prev - 1));
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = prev + COLS;
+          if (next < total) {
+            if (next >= visibleCount) setVisibleCount((c) => c + 30);
+            return next;
+          }
+          return prev;
+        });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          if (prev < COLS) {
+            setTopNav('settings');
+            return prev;
+          }
+          return prev - COLS;
+        });
+      } else if (e.key === 'Enter' || e.key === ' ' || e.key === 'Select') {
+        e.preventDefault();
+        if (visibleChannels[focusedIndex]) {
+          abrirCanal(visibleChannels[focusedIndex]);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    activeChannel,
+    ajustesAbertos,
+    topNav,
+    filteredChannels.length,
+    visibleChannels,
+    focusedIndex,
+    visibleCount,
+    abrirCanal
+  ]);
 
   return (
     <div className="flex min-h-screen flex-col bg-noite-900 text-tinta-100">
       <div className="sticky top-0 z-40">
-        <Header
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          onOpenSettings={() => setAjustesAbertos(true)}
-        />
-        <CategoryBar
-          label={rotuloCategoria}
-          count={filteredChannels.length}
-          onOpenPicker={() => setCategoriaAberta(true)}
-        />
+        <Header channelCount={filteredChannels.length} />
       </div>
 
-      <main className="area-segura-lados area-segura-base mx-auto w-full max-w-7xl flex-1 px-4 py-4">
+      <main className="area-segura-lados area-segura-base mx-auto w-full max-w-[1750px] flex-1 px-5 py-4">
         {filteredChannels.length > 0 ? (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              {visibleChannels.map((canal) => (
-                <ChannelCard
-                  key={canal.url}
-                  channel={canal}
-                  isFavorite={isFavorite(canal)}
-                  onSelect={abrirCanal}
-                  onToggleFavorite={handleToggleFavorite}
-                />
+            {/* Grade de exatamente 5 canais por linha para Smart TV */}
+            <div className="grid grid-cols-5 gap-4">
+              {visibleChannels.map((canal, idx) => (
+                <div key={canal.url} data-card-index={idx}>
+                  <ChannelCard
+                    channel={canal}
+                    numero={idx + 1}
+                    isFocused={topNav === 'none' && idx === focusedIndex}
+                    onSelect={(c) => {
+                      setFocusedIndex(idx);
+                      abrirCanal(c);
+                    }}
+                  />
+                </div>
               ))}
             </div>
 
             {visibleCount < filteredChannels.length && (
               <button
                 onClick={() => setVisibleCount((anterior) => anterior + 30)}
-                className="mt-5 flex h-16 w-full items-center justify-center gap-2 rounded-2xl border-2 border-noite-500 bg-noite-700 text-xl font-black text-tinta-100 transition active:scale-95"
+                className="mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-noite-500 bg-noite-700 text-lg font-black text-tinta-100 transition active:scale-95"
               >
-                <Plus className="h-7 w-7 text-sol-400" strokeWidth={3} />
+                <Plus className="h-6 w-6 text-sol-400" strokeWidth={3} />
                 Mostrar mais canais
               </button>
             )}
@@ -425,48 +534,32 @@ export default function App() {
             <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-noite-700 text-tinta-500">
               <SearchX className="h-12 w-12" strokeWidth={2} />
             </div>
-            <p className="text-2xl font-black text-tinta-100">Nenhum canal aqui</p>
-            <p className="max-w-sm text-lg leading-snug text-tinta-300">
-              Tente apagar a busca ou escolher outra categoria.
-            </p>
-            <button
-              onClick={() => {
-                setSearchTerm('');
-                setSelectedCategory('abertos');
-              }}
-              className="flex h-toque items-center rounded-2xl bg-sol-400 px-6 text-xl font-black text-noite-900 transition active:scale-95"
-            >
-              Ver canais de TV
-            </button>
+            <p className="text-2xl font-black text-tinta-100">Nenhum canal disponível agora</p>
           </div>
         )}
       </main>
 
+      {/* Aviso de saída com duplo Voltar */}
+      {avisoSair && (
+        <div className="fixed bottom-10 left-1/2 z-50 -translate-x-1/2 rounded-2xl border-2 border-sol-400 bg-noite-800/95 px-6 py-3 text-lg font-black text-sol-400 shadow-2xl backdrop-blur-md">
+          Pressione Voltar novamente para sair do Vovô TV
+        </div>
+      )}
+
       {activeChannel && (
         <VideoPlayer
           channel={activeChannel}
+          numero={indiceAtual + 1}
+          isTv={souTv}
           channelList={playerList}
           onSelectChannel={(canal) => setActiveChannel(canal as ChannelWithHealth)}
           onClose={() => setActiveChannel(null)}
           onPrevChannel={playerList.length > 1 ? () => irParaCanal(-1) : undefined}
           onNextChannel={playerList.length > 1 ? () => irParaCanal(1) : undefined}
-          isFavorite={isFavorite(activeChannel)}
-          onToggleFavorite={handleToggleFavorite}
           onPlaybackOk={handlePlaybackOk}
           onPlaybackFail={handlePlaybackFail}
         />
       )}
-
-      <CategorySheet
-        isOpen={categoriaAberta}
-        selected={selectedCategory}
-        counts={categoryCounts}
-        onSelect={(categoria) => {
-          setSelectedCategory(categoria);
-          setSearchTerm('');
-        }}
-        onClose={() => setCategoriaAberta(false)}
-      />
 
       <SettingsSheet
         isOpen={ajustesAbertos}

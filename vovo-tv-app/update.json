@@ -1,6 +1,6 @@
 {
-  "versionCode": 3,
-  "versionName": "2.1.0",
-  "apkUrl": "https://github.com/caducosilva/Projetos_Vovo/releases/download/v2.1.0/Vovo_TV_Brasil.apk",
-  "notes": "Muitos canais novos e o botão de mandar para a TV agora funciona de verdade na TV da sala."
+  "versionCode": 5,
+  "versionName": "2.1.2",
+  "apkUrl": "https://github.com/caducosilva/Projetos_Vovo/releases/download/v2.1.2/Vovo_TV_Brasil.apk",
+  "notes": "Agora o canal vai mesmo para a TV da sala, e a tela mostra em que passo está."
 }

@@ -22,6 +22,8 @@ export interface TvBridgePlugin {
   setImmersive(options: { value: boolean }): Promise<void>;
   openCastPicker(): Promise<{ opened: boolean; action?: string }>;
   sendToExternalPlayer(options: { url: string; title?: string }): Promise<void>;
+  exitApp(): Promise<void>;
+  getDeviceType(): Promise<{ isTv: boolean }>;
 }
 
 const TvBridge = registerPlugin<TvBridgePlugin>('TvBridge');
@@ -52,5 +54,7 @@ export const tv = {
   setImmersive: (value: boolean) => safe(() => TvBridge.setImmersive({ value })),
   openCastPicker: () => safe(() => TvBridge.openCastPicker()),
   sendToExternalPlayer: (url: string, title?: string) =>
-    safe(() => TvBridge.sendToExternalPlayer({ url, title }))
+    safe(() => TvBridge.sendToExternalPlayer({ url, title })),
+  exitApp: () => safe(() => TvBridge.exitApp()),
+  getDeviceType: () => safe(() => TvBridge.getDeviceType())
 };

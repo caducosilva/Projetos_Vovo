@@ -10,7 +10,6 @@ import {
   Sun,
   Tv,
   Radio,
-  Star,
   ChevronLeft,
   RotateCcw,
   List,
@@ -20,50 +19,97 @@ import {
   Loader2
 } from 'lucide-react';
 import type { Channel, ChannelWithHealth } from '../types';
-import { tv, isNative } from '../utils/tvBridge';
+import { tv } from '../utils/tvBridge';
 import { podeMandarParaTv } from '../utils/tvsDaCasa';
 import { ehCanalDeCamera } from '../utils/cameras';
+import { fontesDoCanal } from '../utils/fontes';
+import { ordenarFontes, lembrarFonteBoa } from '../utils/corrida';
+import { FaixaDoCanal } from './FaixaDoCanal';
+import { programacaoDoCanal, comPassePluto, type AgoraEDepois } from '../utils/programacao';
+
+/** Programa no ar do canal em foco no guia. Busca so de quem esta em foco. */
+const ProgramaAgora: React.FC<{ epg?: string }> = ({ epg }) => {
+  const [guia, setGuia] = useState<AgoraEDepois>({});
+  useEffect(() => {
+    let vivo = true;
+    setGuia({});
+    programacaoDoCanal(epg).then((r) => {
+      if (vivo) setGuia(r);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [epg]);
+  if (!guia.agora) return null;
+  return <span className="block truncate text-base font-bold text-sol-400">Agora: {guia.agora.titulo}</span>;
+};
 import { cleanChannelName, isRadioChannel } from '../utils/channelName';
 import { CastSheet } from './CastSheet';
 import { App as CapacitorApp } from '@capacitor/app';
 
 interface VideoPlayerProps {
   channel: ChannelWithHealth | Channel | null;
+  numero?: number;
+  isTv?: boolean;
   channelList?: (ChannelWithHealth | Channel)[];
   onSelectChannel?: (channel: ChannelWithHealth | Channel) => void;
   onClose: () => void;
   onPrevChannel?: () => void;
   onNextChannel?: () => void;
-  isFavorite: boolean;
-  onToggleFavorite: (channel: Channel) => void;
   onPlaybackOk?: (url: string) => void;
   onPlaybackFail?: (url: string, error: string) => void;
+  /** Acabaram TODAS as fontes deste canal; quem chama decide o que fazer. */
+  onChannelExhausted?: () => void;
+  /** Numero do primeiro canal da lista (1 na TV Aberta, 101 no Cine Zap). */
+  primeiroNumero?: number;
 }
 
-type Hud = { tipo: 'volume' | 'brilho' | 'canal' | 'favorito'; valor: number | string } | null;
+/** Janela para o segundo Voltar contar como "quero sair". */
+const JANELA_VOLTAR_MS = 3000;
+/** Dois "voltar" mais perto que isso sao o mesmo aperto do controle. */
+const REPIQUE_VOLTAR_MS = 400;
+/** Espera depois do ultimo digito antes de sintonizar o numero digitado. */
+const ESPERA_DIGITO_MS = 1600;
+
+type Hud = { tipo: 'volume' | 'brilho' | 'canal'; valor: number | string } | null;
 
 const PASSOS_BRILHO = [1, 0.7, 0.45, 0.2];
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channel,
+  numero,
+  isTv = false,
   channelList = [],
   onSelectChannel,
   onClose,
   onPrevChannel,
   onNextChannel,
-  isFavorite,
-  onToggleFavorite,
   onPlaybackOk,
-  onPlaybackFail
+  onPlaybackFail,
+  onChannelExhausted,
+  primeiroNumero = 1
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
   const [deitado, setDeitado] = useState(false);
   const [volume, setVolume] = useState(() => {
+    // Sempre le o volume salvo, TV ou celular. Antes a TV ignorava o valor
+    // salvo e forcava 100% a cada canal reaberto: parecia que o volume
+    // "pulava" sozinho, quando na verdade era o app jogando fora o nivel
+    // que a pessoa tinha deixado.
     const salvo = localStorage.getItem('vovo_tv_volume');
-    return salvo !== null ? parseFloat(salvo) : 1.0;
+    if (salvo !== null) {
+      const v = parseFloat(salvo);
+      if (!isNaN(v) && v >= 0 && v <= 1) return v;
+    }
+    return isTv ? 1.0 : 0.5; // sem nada salvo ainda: TV comeca no maximo, celular em 50%
   });
+  const volumeRef = useRef(volume);
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
+
   const [brilho, setBrilho] = useState(() => {
     const salvo = localStorage.getItem('vovo_tv_brightness');
     return salvo !== null ? parseFloat(salvo) : 1.0;
@@ -73,8 +119,50 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [mostrarControles, setMostrarControles] = useState(true);
   const [tocando, setTocando] = useState(true);
   const [mudo, setMudo] = useState(false);
+  const mudoRef = useRef(mudo);
+  useEffect(() => {
+    mudoRef.current = mudo;
+  }, [mudo]);
   /** Sobe a cada "tentar de novo" e refaz a carga do stream do zero. */
   const [tentativa, setTentativa] = useState(0);
+
+  /**
+   * Fonte do canal em uso. O mesmo canal costuma ter varias URLs; quando a
+   * atual nao da imagem, o player anda para a proxima sozinho, sem a vovo
+   * precisar sair e voltar. Zera a cada troca de canal.
+   */
+  // chave em texto: o objeto do canal pode ser recriado a cada render, e a
+  // lista de fontes so deve mudar quando as URLs mudarem de verdade
+  const chaveFontes = channel ? fontesDoCanal(channel).join('\n') : '';
+  const fontes = useMemo(() => (chaveFontes ? chaveFontes.split('\n') : []), [chaveFontes]);
+  const [indiceFonte, setIndiceFonte] = useState(0);
+
+  /**
+   * Ordem em que as fontes vao ser tentadas. Antes era a ordem fixa da lista,
+   * esperando ate 20s em cada URL morta: canal com tres fontes ruins na frente
+   * levava mais de um minuto para abrir. Agora a ultima fonte que tocou vai
+   * primeiro e, sem ela, todas sao consultadas AO MESMO TEMPO e a primeira que
+   * responder com playlist valida e a que toca (ver utils/corrida.ts).
+   */
+  const [ordem, setOrdem] = useState<string[] | null>(null);
+  useEffect(() => {
+    setIndiceFonte(0);
+    setOrdem(null);
+    if (fontes.length === 0) return;
+    const controle = new AbortController();
+    ordenarFontes(channel?.id || channel?.name || '', fontes, controle.signal).then((r) => {
+      if (!controle.signal.aborted) setOrdem(r);
+    });
+    return () => controle.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontes]);
+
+  /** URL que esta tocando agora e se ainda ha reserva depois dela. */
+  const endereco = ordem ? ordem[Math.min(indiceFonte, ordem.length - 1)] || '' : '';
+  const temReserva = !!ordem && indiceFonte + 1 < ordem.length;
+
+  /** Sobe a cada tecla/toque: a faixa com nome e programa reaparece por 3s. */
+  const [reacender, setReacender] = useState(0);
 
   const [gavetaAberta, setGavetaAberta] = useState(false);
   const [buscaGaveta, setBuscaGaveta] = useState('');
@@ -126,6 +214,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const reiniciarControles = useCallback(() => {
     setMostrarControles(true);
+    setReacender((n) => n + 1);
     if (controlesTimerRef.current !== null) window.clearTimeout(controlesTimerRef.current);
     if (!gavetaAberta && !castAberto) {
       controlesTimerRef.current = window.setTimeout(() => setMostrarControles(false), 5000);
@@ -157,10 +246,54 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => {
       tv.keepAwake(false);
       tv.resetBrightness();
-      tv.setLandscape(false);
       tv.setImmersive(false);
     };
   }, []);
+
+  /**
+   * Voltar, igual em todo lugar do player:
+   *   - com a lista de canais (ou o "mandar pra TV") aberta, fecha ela;
+   *   - assistindo, o primeiro Voltar so avisa e o segundo, em ate 3s, leva
+   *     para a tela de escolher TV Aberta ou Cine Zap.
+   * Assim um Voltar sem querer nao tira a vovo do programa.
+   */
+  const [avisoVoltar, setAvisoVoltar] = useState(false);
+  const ultimoVoltarRef = useRef(0);
+  const avisoVoltarTimerRef = useRef<number | null>(null);
+  const voltarRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    voltarRef.current = () => {
+      if (castRef.current) {
+        setCastAberto(false);
+        return;
+      }
+      if (gavetaRef.current) {
+        setGavetaAberta(false);
+        return;
+      }
+      const agora = Date.now();
+      const desdeOUltimo = agora - ultimoVoltarRef.current;
+      // Um aperto so pode chegar duas vezes (botao do Android + tecla do
+      // WebView, ou repeticao do controle). Abaixo disso e o mesmo aperto.
+      if (desdeOUltimo < REPIQUE_VOLTAR_MS) return;
+      if (desdeOUltimo < JANELA_VOLTAR_MS) {
+        ultimoVoltarRef.current = 0;
+        setAvisoVoltar(false);
+        fecharRef.current();
+        return;
+      }
+      ultimoVoltarRef.current = agora;
+      setAvisoVoltar(true);
+      if (avisoVoltarTimerRef.current !== null) window.clearTimeout(avisoVoltarTimerRef.current);
+      avisoVoltarTimerRef.current = window.setTimeout(() => setAvisoVoltar(false), JANELA_VOLTAR_MS);
+    };
+  });
+  useEffect(
+    () => () => {
+      if (avisoVoltarTimerRef.current !== null) window.clearTimeout(avisoVoltarTimerRef.current);
+    },
+    []
+  );
 
   // Refs para o listener do botao voltar ser registrado uma vez so
   const gavetaRef = useRef(gavetaAberta);
@@ -188,11 +321,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     let cancelado = false;
     let remover: (() => void) | null = null;
 
-    CapacitorApp.addListener('backButton', () => {
-      if (castRef.current) setCastAberto(false);
-      else if (gavetaRef.current) setGavetaAberta(false);
-      else fecharRef.current();
-    })
+    CapacitorApp.addListener('backButton', () => voltarRef.current())
       .then((handle) => {
         if (cancelado) {
           handle.remove();
@@ -216,6 +345,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!channel || !video) return;
 
     setCarregando(true);
+    // ainda escolhendo a fonte mais rapida: so mostra "ligando o canal"
+    if (!endereco) return;
     setErro(null);
 
     if (hlsRef.current) {
@@ -223,7 +354,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       hlsRef.current = null;
     }
 
-    const endereco = channel.url;
     const ehHls = endereco.includes('.m3u8') || endereco.includes('.m3u');
 
     let encerrado = false;
@@ -237,30 +367,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
      */
     const relogio = window.setTimeout(() => {
       if (!encerrado) falha('tempo esgotado');
-    }, 20000);
+    }, indiceFonte === 0 ? 12000 : 9000);
+
 
     const sucesso = () => {
       if (encerrado) return;
       encerrado = true;
       window.clearTimeout(relogio);
+      if (video) {
+        video.volume = volumeRef.current;
+        video.muted = mudoRef.current;
+      }
       setCarregando(false);
       setErro(null);
+      lembrarFonteBoa(channel.id || channel.name, endereco);
       onPlaybackOk?.(endereco);
     };
 
     const falha = (detalhe: string) => {
       if (encerrado) return;
       encerrado = true;
+      console.warn('[player] FALHOU', JSON.stringify({ canal: channel.name, detalhe, temReserva }));
       window.clearTimeout(relogio);
+      // marca ESTA fonte como ruim (a saude e por URL), nao o canal inteiro
+      onPlaybackFail?.(endereco, detalhe);
+
+      if (temReserva) {
+        // ainda ha outra URL deste mesmo canal: troca sem mostrar erro
+        setIndiceFonte((i) => i + 1);
+        return;
+      }
+
       setCarregando(false);
-      // A camera falha por um motivo so, e "canal fora do ar" mandaria a vovo
-      // procurar outro canal em vez de avisar que o computador esta desligado.
       setErro(
         ehCanalDeCamera(channel)
           ? 'A câmera não está aparecendo agora.'
           : 'Este canal não está no ar agora.'
       );
-      onPlaybackFail?.(endereco, detalhe);
+      onChannelExhausted?.();
     };
 
     video.onplaying = sucesso;
@@ -275,10 +419,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         backBufferLength: 20,
         capLevelToPlayerSize: true,
         startLevel: -1,
-        maxBufferHole: 0.5
+        maxBufferHole: 0.5,
+        // Desistir rapido de fonte ruim: o padrao do hls.js tenta de novo por
+        // quase um minuto antes de admitir erro, e so depois disso o player
+        // ia para a proxima URL do canal.
+        manifestLoadingTimeOut: 6000,
+        manifestLoadingMaxRetry: temReserva ? 0 : 2,
+        levelLoadingTimeOut: 6000,
+        levelLoadingMaxRetry: temReserva ? 0 : 2,
+        fragLoadingTimeOut: 8000,
+        fragLoadingMaxRetry: temReserva ? 1 : 3
       });
 
-      hls.loadSource(endereco);
+      hls.loadSource(comPassePluto(endereco));
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_evento, dados) => {
@@ -309,28 +462,52 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           hls.nextLevel = teto;
         }
 
+        if (video) {
+          video.volume = volumeRef.current;
+          video.muted = mudoRef.current;
+        }
+
         video.play().then(sucesso).catch(() => {
           /* o autoplay pode ser barrado; o onplaying resolve quando destravar */
         });
       });
 
+      // Uma tentativa de recuperar por tipo de erro. Sem esse limite o
+      // startLoad/recoverMediaError repetia para sempre numa fonte quebrada e
+      // o canal nunca chegava a tentar a proxima URL.
+      let recuperouRede = false;
+      let recuperouMidia = false;
+
       hls.on(Hls.Events.ERROR, (_evento, dados) => {
         if (!dados.fatal) return;
-        if (dados.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-        else if (dados.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-        else {
-          hls.destroy();
-          falha(dados.details || 'erro fatal de hls');
+        // fica no log: e por onde se descobre canal quebrado na TV, que nao
+        // tem console do navegador para abrir
+        console.warn('[player] hls', JSON.stringify({
+          tipo: dados.type,
+          detalhe: dados.details,
+          codigo: dados.response?.code
+        }));
+        // com outra fonte na reserva, nao insiste: trocar e mais rapido
+        if (dados.type === Hls.ErrorTypes.NETWORK_ERROR && !recuperouRede && !temReserva) {
+          recuperouRede = true;
+          hls.startLoad();
+          return;
         }
+        if (dados.type === Hls.ErrorTypes.MEDIA_ERROR && !recuperouMidia) {
+          recuperouMidia = true;
+          hls.recoverMediaError();
+          return;
+        }
+        hls.destroy();
+        falha(dados.details || 'erro fatal de hls');
       });
 
       hlsRef.current = hls;
     } else {
-      video.src = endereco;
-      video.play().then(sucesso).catch(() => {
-        video.muted = true;
-        video.play().then(sucesso).catch(() => falha('nao consegui iniciar'));
-      });
+      video.src = comPassePluto(endereco);
+      video.volume = volumeRef.current;
+      video.muted = mudoRef.current;
+      video.play().then(sucesso).catch(() => falha('nao consegui iniciar'));
     }
 
     return () => {
@@ -342,31 +519,36 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
+      // Canal sem hls.js (URL sem .m3u8, vai direto pro <video>): sem isto a
+      // conexao do stream anterior nao fecha de verdade ao trocar ou sair,
+      // e em provedor de IPTV com limite de conexao simultanea isso segura
+      // a vaga da conta e trava o proximo canal a abrir.
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
     };
-  }, [channel, tentativa, onPlaybackOk, onPlaybackFail]);
+    // Depende do ENDERECO, nao do objeto `channel`: quem monta o canal pode
+    // recriar o objeto a cada render sem querer, e ai o player se remontava
+    // no meio da exibicao. Endereco igual = nada para refazer.
+  }, [endereco, temReserva, tentativa, onPlaybackOk, onPlaybackFail, onChannelExhausted]);
+  // indiceFonte fica de fora de proposito: ele so muda junto com o endereco
 
   /**
-   * No celular quem manda e o volume do aparelho, igual aos botoes laterais,
-   * entao o video fica em 100% para o som nao ser abafado duas vezes.
+   * Mantem o volume persistido e ajusta no elemento de video.
    */
   useEffect(() => {
     const video = videoRef.current;
     if (video) {
-      video.volume = isNative ? 1 : volume;
+      video.volume = volume;
       video.muted = mudo;
     }
-    if (isNative) tv.setVolume(volume);
     localStorage.setItem('vovo_tv_volume', volume.toString());
   }, [volume, mudo]);
 
   /**
-   * Tela cheia pelo giroscopio: deitou o celular, o video ocupa tudo. Sem
-   * botao proprio porque a API de fullscreen do WebView brigava com a rotacao
-   * nativa e derrubava o app.
+   * Modo imersivo e tela cheia permanente na TV.
    */
   useEffect(() => {
-    tv.followSensor();
-
     const consulta = window.matchMedia('(orientation: landscape)');
     const aplicar = () => {
       setDeitado(consulta.matches);
@@ -378,21 +560,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => {
       consulta.removeEventListener('change', aplicar);
       tv.setImmersive(false);
-      tv.lockPortrait();
     };
   }, []);
 
   /**
-   * Canal aceito pela TV: o celular cala a boca.
+   * O canal esta indo para a TV: o celular cala a boca na hora.
    *
-   * Sem isto o mesmo jogo toca nos dois aparelhos com meio segundo de
-   * diferenca, o eco confunde a vovo e ainda gasta a internet duas vezes.
+   * Dois motivos. O obvio e o eco, porque o mesmo jogo tocando nos dois
+   * aparelhos com meio segundo de diferenca confunde a vovo. O que nao e
+   * obvio: a conta do provedor de IPTV permite poucas conexoes ao mesmo
+   * tempo, entao enquanto o celular nao larga o canal a TV nem consegue
+   * abrir o dela.
    */
   const pausarPorCausaDaTv = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     video.pause();
     setTocando(false);
+  }, []);
+
+  /** A TV recusou: devolve o canal para o celular, sem a vovo pedir. */
+  const voltarATocarNoCelular = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.play().catch(() => undefined);
+    setTocando(true);
   }, []);
 
   const alternarPlay = useCallback(() => {
@@ -423,6 +615,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setVolume((anterior) => {
         const proximo = Math.min(1, Math.max(0, Math.round((anterior + delta) * 20) / 20));
         dispararHud('volume', Math.round(proximo * 100));
+        if (videoRef.current) {
+          videoRef.current.volume = proximo;
+          videoRef.current.muted = false;
+        }
+        localStorage.setItem('vovo_tv_volume', proximo.toString());
         return proximo;
       });
       reiniciarControles();
@@ -444,8 +641,140 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [dispararHud, reiniciarControles]);
 
   const tentarDeNovo = useCallback(() => {
+    setIndiceFonte(0);
     setTentativa((anterior) => anterior + 1);
   }, []);
+
+  // --------------------------------------------------------------- controle remoto TV
+  /**
+   * Guia de canais (a gaveta) no controle remoto: cima e baixo andam pela
+   * lista, OK sintoniza, Voltar ou direita fecham. Antes cima e baixo trocavam
+   * o canal por tras da lista aberta e nao havia como escolher nada nela.
+   */
+  const [focoGaveta, setFocoGaveta] = useState(0);
+  const canaisGavetaRef = useRef<(ChannelWithHealth | Channel)[]>([]);
+  const focoGavetaRef = useRef(0);
+  focoGavetaRef.current = focoGaveta;
+  const selecionarRef = useRef(onSelectChannel);
+  selecionarRef.current = onSelectChannel;
+
+  const abrirGuia = useCallback(() => {
+    const lista = canaisGavetaRef.current;
+    const atual = lista.findIndex((c) => c.url === channel?.url);
+    setFocoGaveta(atual >= 0 ? atual : 0);
+    setGavetaAberta(true);
+  }, [channel?.url]);
+
+  /** Numero digitado no controle, como na TV de operadora: 1 e 2 = canal 12. */
+  const [digitos, setDigitos] = useState('');
+  const digitosRef = useRef('');
+  const digitoTimerRef = useRef<number | null>(null);
+  const digitar = useCallback(
+    (d: string) => {
+      const proximo = (digitosRef.current + d).slice(-3);
+      digitosRef.current = proximo;
+      setDigitos(proximo);
+      if (digitoTimerRef.current !== null) window.clearTimeout(digitoTimerRef.current);
+      digitoTimerRef.current = window.setTimeout(() => {
+        const alvo = parseInt(digitosRef.current, 10) - primeiroNumero;
+        digitosRef.current = '';
+        setDigitos('');
+        const canal = channelList[alvo];
+        if (canal) onSelectChannel?.(canal);
+        else dispararHud('canal', 'Esse canal não existe');
+      }, ESPERA_DIGITO_MS);
+    },
+    [channelList, onSelectChannel, primeiroNumero, dispararHud]
+  );
+  useEffect(
+    () => () => {
+      if (digitoTimerRef.current !== null) window.clearTimeout(digitoTimerRef.current);
+    },
+    []
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        if (e.key !== 'Escape' && e.key !== 'GoBack') return;
+      }
+      const ok = e.key === 'Enter' || e.key === 'Select' || e.key === ' ';
+
+      if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack') {
+        e.preventDefault();
+        voltarRef.current();
+        return;
+      }
+
+      if (gavetaRef.current) {
+        const total = canaisGavetaRef.current.length;
+        if (e.key === 'ArrowUp' || e.key === 'ChannelUp' || e.key === 'PageUp') {
+          e.preventDefault();
+          setFocoGaveta((i) => (total ? (i - 1 + total) % total : 0));
+        } else if (e.key === 'ArrowDown' || e.key === 'ChannelDown' || e.key === 'PageDown') {
+          e.preventDefault();
+          setFocoGaveta((i) => (total ? (i + 1) % total : 0));
+        } else if (ok) {
+          e.preventDefault();
+          const canal = canaisGavetaRef.current[focoGavetaRef.current];
+          if (canal) selecionarRef.current?.(canal);
+          setGavetaAberta(false);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          setGavetaAberta(false);
+        }
+        return;
+      }
+
+      if (/^[0-9]$/.test(e.key)) {
+        digitar(e.key);
+        return;
+      }
+
+      if (e.key === 'ArrowUp' || e.key === 'ChannelUp' || e.key === 'PageUp') {
+        e.preventDefault();
+        onPrevChannel?.();
+      } else if (e.key === 'ArrowDown' || e.key === 'ChannelDown' || e.key === 'PageDown') {
+        e.preventDefault();
+        onNextChannel?.();
+      } else if (e.key === 'MediaPlayPause') {
+        e.preventDefault();
+        alternarPlay();
+      } else if (ok && !isTv) {
+        e.preventDefault();
+        alternarPlay();
+      } else if (ok || e.key === 'ArrowLeft') {
+        // na TV o OK abre o guia de canais, como no controle da operadora
+        e.preventDefault();
+        abrirGuia();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        reiniciarControles();
+      } else if (e.key === 'm' || e.key === 'M' || e.key === 'VolumeMute') {
+        e.preventDefault();
+        alternarMudo();
+      }
+    };
+
+    const handleChannelNext = () => onNextChannel?.();
+    const handleChannelPrev = () => onPrevChannel?.();
+    const handlePlayPause = () => alternarPlay();
+    const handleBack = () => voltarRef.current();
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('vovo:channel_next', handleChannelNext);
+    window.addEventListener('vovo:channel_prev', handleChannelPrev);
+    window.addEventListener('vovo:play_pause', handlePlayPause);
+    window.addEventListener('vovo:back', handleBack);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('vovo:channel_next', handleChannelNext);
+      window.removeEventListener('vovo:channel_prev', handleChannelPrev);
+      window.removeEventListener('vovo:play_pause', handlePlayPause);
+      window.removeEventListener('vovo:back', handleBack);
+    };
+  }, [isTv, onPrevChannel, onNextChannel, alternarPlay, alternarMudo, reiniciarControles, abrirGuia, digitar]);
 
   // --------------------------------------------------------------- gestos
 
@@ -525,13 +854,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  const alternarFavorito = (e: React.SyntheticEvent) => {
-    e.stopPropagation();
-    if (!channel) return;
-    onToggleFavorite(channel);
-    dispararHud('favorito', isFavorite ? 'Tirado dos favoritos' : 'Guardado nos favoritos');
-  };
-
   const canaisGaveta = useMemo(() => {
     const busca = buscaGaveta.trim().toLowerCase();
     if (!busca) return channelList;
@@ -541,10 +863,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         (c.group || '').toLowerCase().includes(busca)
     );
   }, [channelList, buscaGaveta]);
+  canaisGavetaRef.current = canaisGaveta;
+
+  // o canal em foco no guia sempre a vista
+  useEffect(() => {
+    if (!gavetaAberta) return;
+    document
+      .querySelector<HTMLElement>(`[data-guia-indice="${focoGaveta}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [gavetaAberta, focoGaveta]);
 
   if (!channel) return null;
 
-  const controlesVisiveis = mostrarControles ? 'opacity-100' : 'pointer-events-none opacity-0';
+  // Na TV nao aparece botao nenhum: tudo e pelo controle remoto (Voltar,
+  // cima/baixo troca de canal, esquerda abre a lista, volume e o da TV).
+  // Os botoes na tela sao so para o celular, que nao tem controle.
+  const barrasNaTela = mostrarControles && !isTv;
+  const controlesVisiveis = barrasNaTela ? 'opacity-100' : 'pointer-events-none opacity-0';
   const pararPropagacao = {
     onClick: (e: React.SyntheticEvent) => e.stopPropagation(),
     onTouchStart: (e: React.SyntheticEvent) => e.stopPropagation(),
@@ -562,10 +897,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       onClick={reiniciarControles}
     >
       <video
-        ref={videoRef}
-        playsInline
-        onPlay={() => setTocando(true)}
+        ref={(el) => {
+          (videoRef as any).current = el;
+          if (el) {
+            el.volume = volumeRef.current;
+            el.muted = mudoRef.current;
+          }
+        }}
+        onLoadedMetadata={(e) => {
+          e.currentTarget.volume = volumeRef.current;
+          e.currentTarget.muted = mudoRef.current;
+        }}
+        onPlay={(e) => {
+          e.currentTarget.volume = volumeRef.current;
+          e.currentTarget.muted = mudoRef.current;
+          setTocando(true);
+        }}
+        onPlaying={(e) => {
+          e.currentTarget.volume = volumeRef.current;
+          e.currentTarget.muted = mudoRef.current;
+        }}
         onPause={() => setTocando(false)}
+        playsInline
         className={`h-full w-full object-contain ${radio ? 'hidden' : 'block'}`}
       />
 
@@ -589,17 +942,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Nome do canal na tarja preta */}
-      {!radio && !carregando && !erro && (
-        <div
-          className={`pointer-events-none absolute left-4 z-30 flex items-center gap-2.5 rounded-2xl border border-white/15 bg-black/75 px-4 py-2 transition-all duration-300 ${
-            mostrarControles ? 'top-24' : 'top-6'
-          }`}
-        >
-          <span className="h-3 w-3 shrink-0 rounded-full bg-vivo-400" />
-          <span className="max-w-[60vw] truncate text-lg font-black text-white">{nomeCanal}</span>
-        </div>
-      )}
+      {/* Numero + nome do canal so enquanto liga ou quando deu erro, para a
+          vovo saber qual canal tentou abrir. Assistindo, quem mostra o nome e
+          a faixa de baixo, que some sozinha em 3 segundos. */}
+      <div
+        className={`pointer-events-none absolute top-24 left-4 z-50 flex max-w-[70vw] items-center gap-2.5 rounded-2xl border border-white/15 bg-black/75 px-4 py-2 transition-opacity duration-300 ${
+          carregando || erro ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        <span
+          className={`h-3 w-3 shrink-0 rounded-full ${carregando ? 'bg-alerta-400' : erro ? 'bg-morto-400' : 'bg-vivo-400'}`}
+        />
+        {typeof numero === 'number' && (
+          <span className="shrink-0 rounded-lg bg-sol-400 px-2 py-0.5 text-base font-black text-noite-900">
+            {numero}
+          </span>
+        )}
+        <span className="line-clamp-2 text-lg leading-snug font-black text-white">{nomeCanal}</span>
+      </div>
 
       {/* Aviso de gesto */}
       {hud && (
@@ -625,12 +985,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <span className="text-base font-bold text-tinta-300">Brilho</span>
               </>
             )}
-            {hud.tipo === 'favorito' && (
-              <>
-                <Star className="h-11 w-11 fill-sol-400 text-sol-400" />
-                <span className="text-center text-lg font-black text-white">{hud.valor}</span>
-              </>
-            )}
             {hud.tipo === 'canal' && (
               <>
                 <Tv className="h-11 w-11 text-sol-400" strokeWidth={2.5} />
@@ -644,7 +998,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {carregando && (
         <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/70">
           <Loader2 className="h-16 w-16 animate-spin text-sol-400" strokeWidth={2.5} />
-          <span className="text-xl font-black text-white">Ligando o canal...</span>
+          <span className="text-xl font-black text-white">
+            {indiceFonte > 0 ? 'Procurando outro sinal deste canal...' : 'Ligando o canal...'}
+          </span>
+          {indiceFonte > 0 && (
+            <span className="text-lg font-bold text-tinta-300">
+              tentativa {indiceFonte + 1} de {fontes.length}
+            </span>
+          )}
         </div>
       )}
 
@@ -698,7 +1059,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         <div className="flex-1" />
 
-        {podeMandarParaTv && !radio && (
+        {/* Rodando direto na TV nao faz sentido "mandar pra TV": ja esta nela */}
+        {!isTv && podeMandarParaTv && !radio && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -730,18 +1092,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </button>
         )}
 
-        <button
-          onClick={alternarFavorito}
-          className={`flex h-toque w-toque shrink-0 items-center justify-center rounded-2xl border-2 transition active:scale-95 ${
-            isFavorite
-              ? 'border-sol-400 bg-sol-400 text-noite-900'
-              : 'border-noite-500 bg-noite-900/90 text-tinta-300'
-          }`}
-          aria-label={isFavorite ? 'Tirar dos favoritos' : 'Guardar nos favoritos'}
-          aria-pressed={isFavorite}
-        >
-          <Star className={`h-7 w-7 ${isFavorite ? 'fill-current' : ''}`} strokeWidth={2.5} />
-        </button>
       </div>
 
       {/* Barra de baixo */}
@@ -749,7 +1099,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         className={`area-segura-base absolute right-0 bottom-0 left-0 z-50 bg-gradient-to-t from-black/95 to-transparent px-3 pt-10 transition-opacity duration-300 ${controlesVisiveis}`}
         {...pararPropagacao}
       >
-        {!radio && !deitado && (
+        {!isTv && !radio && !deitado && (
           <p className="mb-3 text-center text-base font-bold text-tinta-300">
             Deite o celular para ver em tela cheia
           </p>
@@ -769,34 +1119,42 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <span className="text-xs font-black">{mudo ? 'Sem som' : 'Mudo'}</span>
           </button>
 
-          <button
-            onClick={() => ajustarVolume(-0.1)}
-            className="flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
-            aria-label="Abaixar o volume"
-          >
-            <Minus className="h-7 w-7 text-sol-400" strokeWidth={3} />
-            <span className="text-xs font-black">Volume</span>
-          </button>
+          {!isTv && (
+            <button
+              onClick={() => ajustarVolume(-0.1)}
+              className="flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
+              aria-label="Abaixar o volume"
+            >
+              <Minus className="h-7 w-7 text-sol-400" strokeWidth={3} />
+              <span className="text-xs font-black">Volume</span>
+            </button>
+          )}
 
-          <button
-            onClick={alternarPlay}
-            className="flex h-16 min-w-20 flex-col items-center justify-center gap-0.5 rounded-2xl bg-sol-400 px-4 text-noite-900 transition active:scale-95"
-            aria-label={tocando ? 'Pausar' : 'Continuar'}
-          >
-            {tocando ? <Pause className="h-8 w-8 fill-current" /> : <Play className="h-8 w-8 fill-current" />}
-            <span className="text-xs font-black">{tocando ? 'Pausar' : 'Continuar'}</span>
-          </button>
+          {/* Canal ao vivo: pausar e retomar so pula pra frente no tempo (nao
+              existe "de onde parei"), confunde mais do que ajuda na TV. */}
+          {!isTv && (
+            <button
+              onClick={alternarPlay}
+              className="flex h-16 min-w-20 flex-col items-center justify-center gap-0.5 rounded-2xl bg-sol-400 px-4 text-noite-900 transition active:scale-95"
+              aria-label={tocando ? 'Pausar' : 'Continuar'}
+            >
+              {tocando ? <Pause className="h-8 w-8 fill-current" /> : <Play className="h-8 w-8 fill-current" />}
+              <span className="text-xs font-black">{tocando ? 'Pausar' : 'Continuar'}</span>
+            </button>
+          )}
 
-          <button
-            onClick={() => ajustarVolume(0.1)}
-            className="flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
-            aria-label="Aumentar o volume"
-          >
-            <Plus className="h-7 w-7 text-sol-400" strokeWidth={3} />
-            <span className="text-xs font-black">Volume</span>
-          </button>
+          {!isTv && (
+            <button
+              onClick={() => ajustarVolume(0.1)}
+              className="flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
+              aria-label="Aumentar o volume"
+            >
+              <Plus className="h-7 w-7 text-sol-400" strokeWidth={3} />
+              <span className="text-xs font-black">Volume</span>
+            </button>
+          )}
 
-          {!radio && (
+          {!isTv && !radio && (
             <button
               onClick={alternarBrilho}
               className="flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
@@ -812,11 +1170,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* Gaveta de canais */}
       {gavetaAberta && (
         <div
-          className="area-segura-topo absolute top-0 right-0 bottom-0 z-[60] flex w-80 max-w-[88vw] flex-col border-l-2 border-noite-600 bg-noite-900"
+          className={`area-segura-topo absolute top-0 right-0 bottom-0 z-[70] flex max-w-[88vw] flex-col border-l-2 border-noite-600 bg-noite-900 ${isTv ? 'w-[34rem]' : 'w-80'}`}
           {...pararPropagacao}
         >
           <div className="flex items-center gap-2 border-b border-noite-600 px-3 pb-3">
-            <h3 className="flex-1 text-xl font-black text-tinta-100">Canais</h3>
+            <h3 className="flex-1 text-xl font-black text-tinta-100">
+              {isTv ? 'Canais · OK para assistir' : 'Canais'}
+            </h3>
             <button
               onClick={() => setGavetaAberta(false)}
               className="flex h-12 w-12 items-center justify-center rounded-xl border-2 border-noite-500 bg-noite-700 text-tinta-100 transition active:scale-90"
@@ -826,6 +1186,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </button>
           </div>
 
+          {!isTv && (
           <div className="relative border-b border-noite-600 p-3">
             <Search
               className="pointer-events-none absolute top-1/2 left-6 h-5 w-5 -translate-y-1/2 text-tinta-500"
@@ -839,25 +1200,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               className="h-13 w-full rounded-xl border-2 border-noite-500 bg-noite-700 pr-3 pl-11 text-base font-bold text-tinta-100 placeholder-tinta-500 outline-none focus:border-sol-400"
             />
           </div>
+          )}
 
           <div className="flex-1 space-y-2 overflow-y-auto overscroll-contain p-2">
-            {canaisGaveta.map((canal) => {
+            {canaisGaveta.map((canal, indice) => {
               const ativo = canal.url === channel.url;
+              const focado = isTv && indice === focoGaveta;
+              const numeroDoCanal = channelList.indexOf(canal) + primeiroNumero;
               return (
                 <button
                   key={canal.url}
+                  data-guia-indice={indice}
                   onClick={() => {
                     onSelectChannel?.(canal);
                     setGavetaAberta(false);
                   }}
-                  className={`flex min-h-16 w-full items-center gap-2 rounded-2xl border-2 p-2 text-left transition active:scale-[0.98] ${
+                  className={`flex min-h-16 w-full items-center gap-3 rounded-2xl border-2 p-2 text-left transition active:scale-[0.98] ${
                     ativo
                       ? 'border-sol-400 bg-sol-400 text-noite-900'
                       : 'border-noite-600 bg-noite-700 text-tinta-100'
-                  }`}
+                  } ${focado ? 'ring-4 ring-white' : ''}`}
                 >
-                  <span className="line-clamp-2 flex-1 text-base leading-snug font-black">
-                    {cleanChannelName(canal.name)}
+                  <span className="w-12 shrink-0 text-center font-mono text-lg font-black opacity-80">
+                    {numeroDoCanal}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`line-clamp-2 leading-snug font-black ${isTv ? 'text-xl' : 'text-base'}`}>
+                      {cleanChannelName(canal.name)}
+                    </span>
+                    {focado && <ProgramaAgora epg={canal.epg} />}
                   </span>
                   {ativo && <span className="h-3 w-3 shrink-0 rounded-full bg-noite-900" />}
                 </button>
@@ -867,12 +1238,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {avisoVoltar && (
+        <div className="pointer-events-none absolute top-[8vh] left-1/2 z-[80] -translate-x-1/2 rounded-2xl border-2 border-sol-400 bg-noite-900/95 px-7 py-4 text-center text-2xl font-black text-sol-400 shadow-2xl">
+          Aperte Voltar de novo para escolher outra TV
+        </div>
+      )}
+
+      {digitos && (
+        <div className="pointer-events-none absolute top-[8vh] right-[6vw] z-[80] rounded-2xl bg-sol-400 px-6 py-3 font-mono text-5xl font-black text-noite-900 shadow-2xl">
+          {digitos}
+        </div>
+      )}
+
+      {!radio && (
+        <FaixaDoCanal
+          numero={numero}
+          nome={nomeCanal}
+          logo={channel.logo}
+          categoria={channel.group}
+          epg={channel.epg}
+          reacender={reacender}
+          acimaDosControles={barrasNaTela}
+        />
+      )}
+
       <CastSheet
         isOpen={castAberto}
         channelName={channel.name}
         channelUrl={channel.url}
         onClose={() => setCastAberto(false)}
-        onFoiParaTv={pausarPorCausaDaTv}
+        onVaiParaTv={pausarPorCausaDaTv}
+        onVoltaProCelular={voltarATocarNoCelular}
       />
     </div>
   );

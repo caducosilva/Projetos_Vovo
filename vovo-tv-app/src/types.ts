@@ -7,6 +7,15 @@ export interface Channel {
   group: string;
   country: string;
   url: string;
+  /**
+   * Todas as URLs deste mesmo canal, melhor primeiro. Quando a que esta
+   * tocando para, o player pula sozinho para a proxima.
+   */
+  sources?: string[];
+  /** 'abertos' = emissora aberta, 'pluto' = canal 24h do Pluto TV */
+  origem?: 'abertos' | 'pluto' | 'fast';
+  /** Guia de programacao: "epgpw:<id>" ou "pluto:<id>" (ver utils/programacao.ts) */
+  epg?: string;
   isCustom?: boolean;
   isRadio?: boolean;
   region?: string;
@@ -18,40 +27,6 @@ export interface ChannelWithHealth extends Channel {
   health: HealthStatus;
   signalStrength: number;
   latencyMs?: number;
-}
-
-export type CategoryKey =
-  | 'cameras'
-  | 'abertos'
-  | 'radios-todas'
-  | 'radios-sp'
-  | 'radios-mg'
-  | 'radios-ba'
-  | 'radios-rj'
-  | 'radios-sul'
-  | 'radios-co'
-  | 'radios-ne'
-  | 'radios-norte'
-  | 'brasil'
-  | 'latam'
-  | 'sp-mogi'
-  | 'bahia'
-  | 'noticias'
-  | 'filmes'
-  | 'series'
-  | 'infantil'
-  | 'esportes'
-  | 'documentarios'
-  | 'musica'
-  | 'religioso'
-  | 'favoritos'
-  | 'todos'
-  | 'outros';
-
-export interface CategoryInfo {
-  key: CategoryKey;
-  label: string;
-  icon: string;
 }
 
 export interface PlayerState {

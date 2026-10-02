@@ -1,10 +1,22 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Cast, Tv, RotateCcw, AlertTriangle, Square, Loader2 } from 'lucide-react';
+import {
+  Cast,
+  Tv,
+  RotateCcw,
+  AlertTriangle,
+  Square,
+  Loader2,
+  ChevronDown,
+  ChevronUp
+} from 'lucide-react';
 import {
   procurarTvs,
   mandarParaTv,
   pararNaTv,
   avisarFormato,
+  ouvirPassos,
+  passo,
+  type PassoDoCast,
   type TvNaRede
 } from '../utils/tvsDaCasa';
 import { cleanChannelName } from '../utils/channelName';
@@ -15,8 +27,10 @@ interface CastSheetProps {
   channelName: string;
   channelUrl: string;
   onClose: () => void;
-  /** Chamado quando a TV aceitou o canal, para o celular parar de tocar junto. */
-  onFoiParaTv?: () => void;
+  /** Chamado antes de mandar, para o celular liberar o canal e a rede. */
+  onVaiParaTv?: () => void;
+  /** Chamado quando a TV recusou, para o canal voltar a tocar no celular. */
+  onVoltaProCelular?: () => void;
 }
 
 type Estado =
@@ -33,28 +47,126 @@ type Estado =
  * aqui so existe a tela. O texto evita "DLNA", "renderer" e "transmitir": para
  * a vovo isso e "mandar para a TV".
  */
+/**
+ * Diario do que aconteceu com a transmissao.
+ *
+ * A vovo nao precisa disto, entao ele fica fechado e em letra pequena; mas
+ * quando o cast falha e alguem vai investigar, e a diferenca entre "nao
+ * funcionou" e "parou na conexao com a TV as 10h20".
+ */
+const PainelDePassos: React.FC<{
+  passos: PassoDoCast[];
+  aberto: boolean;
+  onAlternar: () => void;
+}> = ({ passos, aberto, onAlternar }) => {
+  if (passos.length === 0) return null;
+  const ultimo = passos[passos.length - 1];
+
+  return (
+    <div className="mt-5 rounded-2xl border-2 border-noite-600 bg-noite-800/60">
+      <button
+        onClick={onAlternar}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        aria-expanded={aberto}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold tracking-wide text-tinta-500 uppercase">
+            O que está acontecendo
+          </span>
+          <span className="block truncate text-base font-bold text-tinta-300">
+            {ultimo.mensagem}
+          </span>
+        </span>
+        {aberto ? (
+          <ChevronUp className="h-6 w-6 shrink-0 text-tinta-500" strokeWidth={2.5} />
+        ) : (
+          <ChevronDown className="h-6 w-6 shrink-0 text-tinta-500" strokeWidth={2.5} />
+        )}
+      </button>
+
+      {aberto && (
+        <ol className="flex flex-col gap-2 border-t-2 border-noite-600 px-4 py-3">
+          {passos.map((p, i) => (
+            <li key={`${p.hora}-${i}`} className="flex gap-2 text-sm leading-snug">
+              <span className="shrink-0 font-mono text-tinta-500">{p.hora}</span>
+              <span className="min-w-0 flex-1">
+                <span
+                  className={
+                    p.fase === 'erro'
+                      ? 'font-bold text-morto-400'
+                      : p.fase === 'tocando' || p.fase === 'aceito'
+                        ? 'font-bold text-vivo-400'
+                        : 'font-bold text-tinta-300'
+                  }
+                >
+                  {p.mensagem}
+                </span>
+                {p.detalhe && (
+                  <span className="block break-all text-tinta-500">{p.detalhe}</span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+};
+
 export const CastSheet: React.FC<CastSheetProps> = ({
   isOpen,
   channelName,
   channelUrl,
   onClose,
-  onFoiParaTv
+  onVaiParaTv,
+  onVoltaProCelular
 }) => {
   const [estado, setEstado] = useState<Estado>({ fase: 'procurando' });
+  const [passos, setPassos] = useState<PassoDoCast[]>([]);
+  const [verDetalhes, setVerDetalhes] = useState(false);
   const nomeCanal = cleanChannelName(channelName);
+
+  const anotar = useCallback((novo: PassoDoCast) => {
+    setPassos((anteriores) => [...anteriores.slice(-19), novo]);
+  }, []);
+
+  // O plugin nativo conta cada etapa; a tela so escuta enquanto esta aberta
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelar: (() => void) | undefined;
+    let vivo = true;
+    void ouvirPassos((p) => anotar(p)).then((remover) => {
+      if (vivo) cancelar = remover;
+      else remover();
+    });
+    return () => {
+      vivo = false;
+      cancelar?.();
+    };
+  }, [isOpen, anotar]);
 
   const procurar = useCallback(async () => {
     setEstado({ fase: 'procurando' });
+    setPassos([]);
     try {
       const aparelhos = await procurarTvs(5000);
+      anotar(
+        passo(
+          aparelhos.length > 0 ? 'lista' : 'nenhuma',
+          aparelhos.length > 0
+            ? `Lista pronta: ${aparelhos.length} aparelho(s)`
+            : 'Nenhuma TV encontrada na rede',
+          aparelhos.map((tv) => `${tv.name} (${tv.kind})`).join(', ') || undefined
+        )
+      );
       setEstado({ fase: 'lista', aparelhos });
     } catch (error) {
-      setEstado({
-        fase: 'erro',
-        mensagem: error instanceof Error ? error.message : 'Nao consegui procurar TVs.'
-      });
+      const mensagem = error instanceof Error ? error.message : 'Nao consegui procurar TVs.';
+      anotar(passo('erro', 'Falhou ao procurar', mensagem));
+      setVerDetalhes(true);
+      setEstado({ fase: 'erro', mensagem });
     }
-  }, []);
+  }, [anotar]);
 
   // Comeca a procurar assim que abre: um passo a menos para a vovo dar
   useEffect(() => {
@@ -63,15 +175,20 @@ export const CastSheet: React.FC<CastSheetProps> = ({
 
   const enviar = async (aparelho: TvNaRede) => {
     setEstado({ fase: 'enviando', nome: aparelho.name });
+    // O celular solta o canal ANTES de a TV pedir o dela. A conta do provedor
+    // de IPTV costuma permitir duas conexoes, e enquanto o celular segurava
+    // uma delas a TV ficava esperando a vida inteira por uma vaga.
+    onVaiParaTv?.();
+    anotar(passo('escolhida', `TV escolhida: ${aparelho.name}`, `tipo ${aparelho.kind}`));
     try {
       await mandarParaTv(aparelho, channelUrl, nomeCanal);
       setEstado({ fase: 'tocando', nome: aparelho.name, tv: aparelho });
-      onFoiParaTv?.();
     } catch (error) {
-      setEstado({
-        fase: 'erro',
-        mensagem: error instanceof Error ? error.message : 'A TV nao aceitou o canal.'
-      });
+      onVoltaProCelular?.();
+      const mensagem = error instanceof Error ? error.message : 'A TV nao aceitou o canal.';
+      anotar(passo('erro', 'Parou aqui', mensagem));
+      setVerDetalhes(true);
+      setEstado({ fase: 'erro', mensagem });
     }
   };
 
@@ -112,6 +229,11 @@ export const CastSheet: React.FC<CastSheetProps> = ({
         <div className="flex flex-col items-center gap-4 py-14 text-center">
           <Loader2 className="h-14 w-14 animate-spin text-sol-400" strokeWidth={2.5} />
           <p className="text-xl font-black text-tinta-100">Mandando para a {estado.nome}...</p>
+          {passos.length > 0 && (
+            <p className="max-w-sm text-base text-tinta-300">
+              {passos[passos.length - 1].mensagem}
+            </p>
+          )}
         </div>
       )}
 
@@ -207,6 +329,14 @@ export const CastSheet: React.FC<CastSheetProps> = ({
             Procurar de novo
           </button>
         </>
+      )}
+
+      {estado.fase !== 'lista' && (
+        <PainelDePassos
+          passos={passos}
+          aberto={verDetalhes}
+          onAlternar={() => setVerDetalhes((v) => !v)}
+        />
       )}
     </Sheet>
   );

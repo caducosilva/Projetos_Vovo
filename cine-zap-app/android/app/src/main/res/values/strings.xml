@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cine Zap</string>
+    <string name="title_activity_main">Cine Zap</string>
+    <string name="package_name">com.cinezap.app</string>
+    <string name="custom_url_scheme">com.cinezap.app</string>
+    <string name="back_button_service_description">Aperte Voltar duas vezes seguidas em qualquer app da TV para ir direto para a tela inicial.</string>
+</resources>

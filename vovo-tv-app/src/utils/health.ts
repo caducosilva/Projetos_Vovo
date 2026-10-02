@@ -180,24 +180,17 @@ export async function probeChannel(url: string, timeoutMs = 5000): Promise<Probe
       return { ok: false, error: `http ${res.status}`, latency_ms: elapsed() };
     }
 
-    // Stream de áudio ou direto (MP3 / AAC / Shoutcast / Icecast / TS)
-    // Tenta HEAD primeiro
+    // Stream de audio ou direto (MP3 / AAC / Shoutcast / Icecast / TS).
+    // So HEAD, nunca GET aqui: muitos desses links nao tem fim (stream ao
+    // vivo continuo) e ignoram o cabecalho Range. Um GET viraria download
+    // sem fim, segurando de verdade uma conexao — em provedor de IPTV
+    // compartilhado isso ocupa a vaga da conta e derruba quem esta
+    // assistindo. Se o HEAD falhar, fica em duvida em vez de arriscar isso.
     const head = await CapacitorHttp.request({ ...common, method: 'HEAD' });
     if (head.status >= 200 && head.status < 400) {
       return { ok: true, latency_ms: elapsed() };
     }
-
-    // Se HEAD for recusado (comum em servidores de rádio Shoutcast), faz GET com Range
-    const res = await CapacitorHttp.request({
-      ...common,
-      method: 'GET',
-      responseType: 'text',
-      headers: { ...common.headers, Range: 'bytes=0-1023' }
-    });
-    if (res.status >= 200 && res.status < 400) {
-      return { ok: true, latency_ms: elapsed() };
-    }
-    return { ok: false, error: `http ${res.status || head.status}`, latency_ms: elapsed() };
+    return { ok: false, error: `http ${head.status}`, latency_ms: elapsed() };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: msg || 'falha de rede', latency_ms: elapsed() };

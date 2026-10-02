@@ -39,11 +39,48 @@ public class MainActivity extends BridgeActivity {
                 settings.setAllowFileAccess(true);
                 settings.setAllowContentAccess(true);
 
+                // Streams de IPTV nao mandam cabecalho CORS, e o hls.js baixa
+                // playlist e video por XHR. Sem este client a TV ficava com a
+                // tela preta em canal que no PC (que tem proxy) abre normal.
+                webView.setWebViewClient(new ProxyDeStream(getBridge()));
+
+                // Habilita foco e navegacao por controle remoto D-Pad na TV
+                webView.setFocusable(true);
+                webView.setFocusableInTouchMode(true);
+                webView.requestFocus();
+
                 ajustarParaBarrasDoSistema(webView);
             }
         } catch (RuntimeException e) {
             e.printStackTrace();
         }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView != null) {
+                int code = event.getKeyCode();
+                if (code == android.view.KeyEvent.KEYCODE_CHANNEL_UP || code == android.view.KeyEvent.KEYCODE_PAGE_UP) {
+                    webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:channel_next'))", null);
+                    return true;
+                } else if (code == android.view.KeyEvent.KEYCODE_CHANNEL_DOWN || code == android.view.KeyEvent.KEYCODE_PAGE_DOWN) {
+                    webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:channel_prev'))", null);
+                    return true;
+                } else if (code == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == android.view.KeyEvent.KEYCODE_MEDIA_PLAY || code == android.view.KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                    webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:play_pause'))", null);
+                    return true;
+                } else if (code == android.view.KeyEvent.KEYCODE_MEDIA_NEXT) {
+                    webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:channel_next'))", null);
+                    return true;
+                } else if (code == android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
+                    webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:channel_prev'))", null);
+                    return true;
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     /**

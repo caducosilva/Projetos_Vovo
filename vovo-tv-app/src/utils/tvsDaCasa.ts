@@ -22,12 +22,24 @@ export interface TvNaRede {
   kind: TipoDeTv;
 }
 
+/** Um passo do caminho ate a TV, do jeito que o plugin nativo conta. */
+export interface PassoDoCast {
+  fase: string;
+  mensagem: string;
+  detalhe?: string;
+  hora: string;
+}
+
 interface CastBridgePlugin {
   available(): Promise<{ available: boolean }>;
   discover(options: { timeoutMs?: number }): Promise<{ devices: TvNaRede[] }>;
   cast(options: { deviceId: string; url: string; title?: string }): Promise<{ ok: boolean; device: string }>;
   stop(): Promise<void>;
   isPlaying(): Promise<{ playing: boolean }>;
+  addListener(
+    evento: 'progresso',
+    callback: (dados: { fase: string; mensagem: string; detalhe?: string }) => void
+  ): Promise<{ remove: () => Promise<void> }>;
 }
 
 const CastBridge = registerPlugin<CastBridgePlugin>('CastBridge');
@@ -96,4 +108,35 @@ export function avisarFormato(tv: TvNaRede, url: string): boolean {
   if (tv.kind === 'chromecast') return false;
   const limpa = (url || '').toLowerCase().split('?')[0];
   return limpa.endsWith('.m3u8') || limpa.endsWith('.m3u');
+}
+
+function agora(): string {
+  return new Date().toLocaleTimeString('pt-BR', { hour12: false });
+}
+
+/**
+ * Acompanha o caminho do canal ate a TV, passo a passo.
+ *
+ * Quando o cast falha, o que resolve e saber ONDE parou: achou a TV, conectou,
+ * a TV recusou o canal. Sem isso as tres falhas viram a mesma tela sem
+ * explicacao, e foi assim que o problema do redirect passou despercebido.
+ */
+export async function ouvirPassos(
+  aoReceber: (passo: PassoDoCast) => void
+): Promise<() => void> {
+  if (!isNative) return () => undefined;
+  try {
+    const inscricao = await CastBridge.addListener('progresso', (dados) => {
+      aoReceber({ ...dados, hora: agora() });
+    });
+    return () => void inscricao.remove();
+  } catch {
+    // Plugin de versao antiga nao emite evento: a tela so fica sem o detalhe
+    return () => undefined;
+  }
+}
+
+/** Passo criado aqui na tela, para o DLNA aparecer no mesmo painel. */
+export function passo(fase: string, mensagem: string, detalhe?: string): PassoDoCast {
+  return { fase, mensagem, detalhe, hora: agora() };
 }

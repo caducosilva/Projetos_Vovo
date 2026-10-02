@@ -134,9 +134,26 @@ public class TvBridge extends Plugin {
         call.resolve(ret);
     }
 
+    private boolean isTv() {
+        android.app.UiModeManager uiModeManager = (android.app.UiModeManager) getContext().getSystemService(Context.UI_MODE_SERVICE);
+        return uiModeManager != null && uiModeManager.getCurrentModeType() == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION;
+    }
+
+    /** Diz para o JS se isto e uma Smart TV (sem toque, controlada por controle remoto). */
+    @PluginMethod
+    public void getDeviceType(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("isTv", isTv());
+        call.resolve(ret);
+    }
+
     /** Trava em paisagem (tela cheia) ou volta para o automatico. */
     @PluginMethod
     public void setLandscape(PluginCall call) {
+        if (isTv()) {
+            call.resolve();
+            return;
+        }
         final boolean landscape = call.getBoolean("value", true);
         final Activity activity = getActivity();
         activity.runOnUiThread(() -> activity.setRequestedOrientation(
@@ -154,6 +171,10 @@ public class TvBridge extends Plugin {
      */
     @PluginMethod
     public void followSensor(PluginCall call) {
+        if (isTv()) {
+            call.resolve();
+            return;
+        }
         final Activity activity = getActivity();
         activity.runOnUiThread(() ->
             activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR)
@@ -164,10 +185,24 @@ public class TvBridge extends Plugin {
     /** Volta a travar em vertical (lista de canais). */
     @PluginMethod
     public void lockPortrait(PluginCall call) {
+        if (isTv()) {
+            call.resolve();
+            return;
+        }
         final Activity activity = getActivity();
         activity.runOnUiThread(() ->
             activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
         );
+        call.resolve();
+    }
+
+    /** Fecha o aplicativo e retorna ao launcher. */
+    @PluginMethod
+    public void exitApp(PluginCall call) {
+        final Activity activity = getActivity();
+        if (activity != null) {
+            activity.runOnUiThread(() -> activity.finishAffinity());
+        }
         call.resolve();
     }
 
