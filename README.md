@@ -66,6 +66,13 @@ cd inicio-vovo && ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+**Receptor de vídeos do celular (DLNA).** A TV não tem DLNA de fábrica, só
+Chromecast. O Início traz um receptor próprio, sempre ligado, que aparece nos
+apps do celular como **"TV da Vovó"**: vídeo (inclusive MKV com áudio AC3),
+música e foto, tocados no player de hardware da TV, sem o celular converter
+nada. Acende a TV se ela estiver em repouso. Detalhes e testes em
+[`inicio-vovo/RECEPTOR_DLNA.md`](inicio-vovo/RECEPTOR_DLNA.md).
+
 Na primeira vez a TV pergunta qual tela inicial usar: escolha **Início** e
 "Sempre".
 

@@ -1,4 +1,4 @@
-# Receptor DLNA do Inicio (funcionando, faltam testes de standby e reboot)
+# Receptor DLNA do Inicio 
 
 A TV Philips 50PUG7907/78 nao tem DLNA nenhum de fabrica (so anuncia Chromecast).
 O Inicio agora traz um receptor DLNA proprio, sempre ligado, que aparece nos
@@ -33,6 +33,17 @@ Tudo OK, 30 de 30 checagens:
 - eventos GENA chegam: PLAYING, PAUSED_PLAYBACK, STOPPED
 Prints conferidos a olho. Obs.: o `screencap` dessa TV imprime uma linha de debug antes do PNG; cortar ate `PNG`.
 
-## Falta
-- testar TV em repouso (standby) recebendo video
-- testar que o receptor volta sozinho depois de reiniciar a TV
+## TV desligada (standby) e reinicio (2026-10-02 19:47-19:49)
+- TV em repouso (`mWakefulness=Asleep`): o receptor continua respondendo (wakelock parcial).
+- Video mandado com a TV desligada: o receptor acende a tela e toca. O sistema da Philips
+  abre a ultima fonte (TV a cabo + guia) por cima ao acordar; por 20s depois de acender,
+  o player volta sozinho para a frente (`TocadorActivity.onStop`). Testado: tocou 0:06 -> 0:15.
+- `adb reboot`: receptor de volta sozinho em ~65s (boot -> `InicioNoBoot`), sem abrir nada.
+  Permissao SYSTEM_ALERT_WINDOW e o vigia (`VigiaJob`, id 4949) sobrevivem ao reinicio.
+
+## Limites conhecidos
+- TV fora da tomada ou em standby profundo (sem rede) nao recebe nada, igual ao Chromecast.
+- O VLC do celular so manda para Chromecast; para usar este receptor, use BubbleUPnP,
+  Web Video Cast ou o "tocar na TV" da galeria. A TV aparece como "TV da Vovó".
+- Ao ligar pelo controle, a Philips abre a TV a cabo (configuracao "ligar em" da propria TV).
+  O botao Home continua indo para o Inicio.
