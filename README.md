@@ -1,8 +1,9 @@
 # Projetos da Vovó
 
-Dois aplicativos Android feitos para uma pessoa idosa usar sozinha: um de TV ao
-vivo e um de rádio. Fonte grande, botão grande, nada de menu escondido, nada de
-login e nenhum anúncio.
+Dois aplicativos Android para a TV da vovó (uma Philips Android TV), feitos para
+uma pessoa idosa usar sozinha: o **TV da Vovó**, que junta TV ao vivo e filmes
+num app só, e o **Início**, a tela inicial da TV. Fonte grande, botão grande,
+nada de menu escondido, nada de login e nenhum anúncio.
 
 **Licença:** [MIT](LICENSE)
 
@@ -25,41 +26,48 @@ login e nenhum anúncio.
 
 ## Os aplicativos
 
-### Vovó TV Brasil (`vovo-tv-app`)
+### TV da Vovó (`tv-da-vovo-app`)
 
-TV ao vivo com cerca de 2.400 canais abertos, regionais e por assinatura,
-entre eles TV Diário de Mogi das Cruzes, Globo SP, SBT, Record, Band, Cultura,
-RedeTV, Aparecida, Canção Nova, esportes, infantis e os canais de notícias. A
-lista sai das mesmas playlists M3U que rodam no computador da casa, trazidas
-pelo `tools/importar_canais_pc.py`, que testa o sinal de cada canal antes de
-deixar ele entrar.
+Um app só, para TV e celular, que substituiu o antigo Vovó TV Brasil e o Cine
+Zap (o código deles fica no histórico do git). Pacote `com.tvdavovo.app`.
 
-- **Mandar o canal para a TV pelo Wi-Fi.** Um toque em "TV" procura as
-  televisões da casa pelos dois caminhos ao mesmo tempo, Chromecast e DLNA, e
-  manda o canal para lá. Sem cabo e sem conta. Quando a TV aceita, o celular
-  para de tocar sozinho, para o som não sair dobrado.
-- **Atualização pelo próprio app.** Quando sai uma versão nova, o app avisa,
-  baixa e chama o instalador. A vovó só toca em "Atualizar agora".
-- Filtros por tema: abertos nacionais, São Paulo e Mogi das Cruzes, religiosos,
-  notícias, filmes e novelas, infantil, esportes e América Latina, escolhidos
-  numa lista de tela cheia em vez de uma fita que rola de lado.
-- Verificação de sinal automática, rodando sozinha em segundo plano. Ela nunca
-  aparece para a vovó: só serve para pôr os canais bons na frente e sumir com
-  os que estão fora do ar.
-- Suporte a controle remoto e TV Box, com navegação por D-Pad, teclas de volume
-  e tela cheia ao deitar o aparelho.
-- Importação de lista M3U própria pela tela de ajustes.
+- **Tela inicial com dois botões grandes:** **TV Aberta** (Globo, Record, SBT,
+  Band, jornais, regionais) e **Cine Zap** (filmes, séries, desenhos). Setas
+  escolhem, OK entra, as teclas 1 e 2 entram direto.
+- **Já entra tocando.** Cima/baixo troca de canal, OK abre o guia, número
+  digitado sintoniza o canal.
+- **Faixa do canal:** nome e programa no ar ("Agora / Depois") por 3 segundos
+  a cada troca.
+- **Voltar duas vezes** volta para a escolha entre TV Aberta e Cine Zap; na
+  escolha, sai do app. Um aperto sem querer não derruba nada.
+- **Troca de link automática:** canal com vários links toca o primeiro que
+  responder e abandona link ruim em 6 a 12 segundos.
+- Listas montadas pelo `tools/montar_listas.py`, que testa **cada link** até
+  chegar vídeo e só grava os que tocam.
+- Chromecast/DLNA, câmeras de casa e atualização pelo próprio app, herdados do
+  Vovó TV (detalhes abaixo).
 
-### Rádios da Vovó (`radios-vovo-app`)
+Detalhes de uso e das listas no [README do app](tv-da-vovo-app/README.md).
 
-Rádios brasileiras em streaming, com destaque para as de Mogi das Cruzes e as
-religiosas, como Transcontinental e Aparecida.
+### Início (`inicio-vovo`)
 
-- Barra de player fixa embaixo, sempre visível, com botão grande de tocar e
-  parar.
-- Timer soneca, que desliga o rádio sozinho depois do tempo escolhido. É o
-  recurso mais usado do app, porque ela dorme ouvindo.
-- Filtro por categoria e capa grande para cada emissora.
+Tela inicial (launcher) da TV, no lugar da tela da fábrica cheia de
+recomendação. Pacote `com.tvdavovo.inicio`, Java puro, sem dependência, APK
+de 46 KB.
+
+- Mostra **só as entradas HDMI** e **os aplicativos instalados**.
+- O TV da Vovó vem primeiro, depois Netflix, Globoplay, YouTube e os outros
+  de uso comum; o resto em ordem alfabética.
+- A casinha do controle sempre volta para ele, e Voltar ali não faz nada.
+- Foco com borda amarela grossa, para ver de longe onde está.
+
+```bash
+cd inicio-vovo && ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Na primeira vez a TV pergunta qual tela inicial usar: escolha **Início** e
+"Sempre".
 
 ---
 
@@ -74,7 +82,7 @@ religiosas, como Transcontinental e Aparecida.
 
 ```bash
 git clone https://github.com/caducosilva/Projetos_Vovo.git
-cd Projetos_Vovo/vovo-tv-app     # ou radios-vovo-app
+cd Projetos_Vovo/tv-da-vovo-app
 npm install
 ```
 
@@ -111,10 +119,10 @@ O APK sai em `android/app/build/outputs/apk/debug/`.
 O app avisa a vovó sozinho quando existe versão nova. Para publicar uma:
 
 1. Suba o `versionCode` e o `versionName` em
-   `vovo-tv-app/android/app/build.gradle`. O `versionCode` precisa ser **maior**
+   `tv-da-vovo-app/android/app/build.gradle`. O `versionCode` precisa ser **maior**
    que o instalado, senão o app não oferece nada.
 2. Gere o APK e publique na aba *Releases* deste repositório.
-3. Edite `vovo-tv-app/update.json` com o mesmo `versionCode`, o `versionName`, a
+3. Edite `tv-da-vovo-app/update.json` com o mesmo `versionCode`, o `versionName`, a
    URL do APK publicado e uma frase curta em `notes` explicando o que mudou.
    Essa frase é lida pela vovó, então nada de "refactor" ou "bump deps".
 4. Faça commit do `update.json`. O app checa a cada 6 horas e na abertura.
@@ -130,7 +138,7 @@ Quem já dispensou uma versão não é perguntado de novo sobre ela, mas o botã
 
 A maioria dos streams de IPTV aberto é servida em HTTP puro. Com o esquema padrão
 `https` do Capacitor, o WebView do Android bloqueia todos eles como Mixed Content
-e o app fica com a grade inteira sem tocar. Por isso os dois apps usam
+e o app fica com a grade inteira sem tocar. Por isso o app usa
 `androidScheme: 'http'` com `cleartext` e `allowMixedContent` ligados.
 
 ### Verificação de sinal
@@ -228,7 +236,7 @@ O app não vive na Play Store. O caminho normal para atualizar seria abrir o
 navegador, achar a pasta de downloads, tocar no arquivo e liberar "origem
 desconhecida", que é passo demais para a vovó.
 
-Então o app lê o `vovo-tv-app/update.json` deste repositório, compara o
+Então o app lê o `tv-da-vovo-app/update.json` deste repositório, compara o
 `versionCode` com o instalado e, se houver versão nova, oferece baixar. O
 download usa o `DownloadManager` do sistema e o APK é entregue ao instalador
 pelo `FileProvider`. Falha de rede aqui nunca vira mensagem de erro: o app
@@ -251,20 +259,20 @@ simplesmente segue funcionando.
 ## Estrutura
 
 ```
-vovo-tv-app/              app de TV ao vivo
-├── src/components/       grade, player, painéis de tela cheia
-├── src/utils/            nomes, categorias, saúde, TVs da casa, atualizador
-├── src/data/             lista de canais padrão
+tv-da-vovo-app/           app de TV (TV Aberta + Cine Zap), TV e celular
+├── src/telas/            Inicio, TvAberta, CineZap
+├── src/components/       player, faixa do canal, painéis de tela cheia
+├── src/utils/            corrida de links, programação, fontes, TVs da casa, atualizador
+├── src/data/             canais_abertos.json e cine_zap.json
 ├── android/.../TvBridge.java      brilho, volume, rotação, tela acesa
+├── android/.../ProxyDeStream.java proxy local dos streams na TV
 ├── android/.../DlnaBridge.java    descoberta SSDP e controle AVTransport
 ├── android/.../CastBridge.java    Google Cast (Chromecast embutido da TV)
-├── tools/importar_canais_pc.py    traz as listas M3U do PC para o app
 ├── android/.../UpdateBridge.java  download do APK e chamada do instalador
-└── update.json           manifesto de versão lido pelo app
-radios-vovo-app/          app de rádio
-├── src/components/       cartões, player fixo e timer soneca
-├── src/data/             lista de emissoras
-└── android/              projeto Capacitor
+├── tools/montar_listas.py         monta e testa as listas de canais
+└── update.json           manifesto de versão lido pelo app (criar ao publicar)
+inicio-vovo/              tela inicial da TV: entradas HDMI e aplicativos
+└── app/src/main/java/.../MainActivity.java
 ```
 
 O visualizador de câmeras da casa fica em repositório separado, porque guarda as
