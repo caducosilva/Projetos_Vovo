@@ -83,6 +83,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle estado) {
         super.onCreate(estado);
+        // receptor de videos do celular (DLNA), sempre ligado
+        ReceptorService.garantir(this);
         ScrollView rolagem = new ScrollView(this);
         rolagem.setBackgroundColor(COR_FUNDO);
         rolagem.setFillViewport(true);
@@ -99,6 +101,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        ReceptorService.garantir(this);
         // remonta sempre: app instalado ou removido aparece/some sozinho
         montar();
     }
