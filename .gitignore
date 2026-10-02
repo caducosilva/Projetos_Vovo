@@ -64,3 +64,7 @@ cameras-vovo/
 # companhia). Sao 8 MB de tela antiga, de um design que ja foi substituido, e
 # entram no repo so para envelhecer. Ficam no disco, fora do historico.
 docs/screenshots/
+
+# Resultado do teste de cada link, gerado pelo montar_listas.py
+tv-da-vovo-app/tools/relatorio_teste.json
+**/docs/screenshots/
