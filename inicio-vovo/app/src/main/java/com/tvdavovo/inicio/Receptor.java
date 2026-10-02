@@ -39,6 +39,8 @@ final class Receptor {
     static volatile long duracaoMs;
     static volatile long posicaoMs;
     static volatile Tocador tocador;
+    /** Quando o receptor acendeu a TV (elapsedRealtime); 0 se nao acendeu. */
+    static volatile long acordouEm;
 
     /** Avisado a cada mudanca de estado (eventos GENA para quem assinou). */
     static volatile Runnable aoMudar;
@@ -112,6 +114,9 @@ final class Receptor {
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP
                     | PowerManager.ON_AFTER_RELEASE, "tvdavovo:acordar");
             acordar.acquire(10_000);
+            acordouEm = android.os.SystemClock.elapsedRealtime();
+        } else {
+            acordouEm = 0;
         }
         Intent abrir = new Intent(ctx, TocadorActivity.class);
         abrir.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

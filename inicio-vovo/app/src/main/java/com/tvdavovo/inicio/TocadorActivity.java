@@ -37,6 +37,9 @@ import java.net.URL;
 public class TocadorActivity extends Activity implements Receptor.Tocador {
 
     private static final int PULO_MS = 10_000;
+    /** Depois de acender a TV, o sistema da Philips abre a ultima fonte por cima: por este tempo, voltamos para a frente. */
+    private static final long JANELA_ACORDAR_MS = 20_000;
+    static final String EXTRA_SO_VOLTAR = "so_voltar";
 
     private VideoView video;
     private ImageView imagem;
@@ -131,14 +134,29 @@ public class TocadorActivity extends Activity implements Receptor.Tocador {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         Receptor.tocador = this;
+        // so trazendo de volta para a frente: o video continua de onde estava
+        if (intent.getBooleanExtra(EXTRA_SO_VOLTAR, false)) return;
         carregar(Receptor.uri, Receptor.meta, true);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
+        if (isFinishing()) return;
+        long desdeQueAcordou = android.os.SystemClock.elapsedRealtime() - Receptor.acordouEm;
+        if (Receptor.acordouEm > 0 && desdeQueAcordou < JANELA_ACORDAR_MS) {
+            // TV acabou de acender e o sistema abriu a TV a cabo/guia por cima: volta para a frente
+            Receptor.PRINCIPAL.postDelayed(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                Intent voltar = new Intent(this, TocadorActivity.class)
+                    .putExtra(EXTRA_SO_VOLTAR, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                startActivity(voltar);
+            }, 1200);
+            return;
+        }
         // apertaram a casinha ou trocaram de app: encerra, para nao ficar tocando escondido
-        if (!isFinishing()) finish();
+        finish();
     }
 
     @Override
