@@ -1,13 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import Hls from 'hls.js';
 import {
-  Volume2,
-  VolumeX,
-  Plus,
-  Minus,
   Play,
   Pause,
-  Sun,
   Tv,
   Radio,
   ChevronLeft,
@@ -88,9 +83,7 @@ const REPIQUE_VOLTAR_MS = 400;
 /** Espera depois do ultimo digito antes de sintonizar o numero digitado. */
 const ESPERA_DIGITO_MS = 1600;
 
-type Hud = { tipo: 'volume' | 'brilho' | 'canal'; valor: number | string } | null;
-
-const PASSOS_BRILHO = [1, 0.7, 0.45, 0.2];
+type Hud = { tipo: 'canal'; valor: number | string } | null;
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   channel,
@@ -113,36 +106,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const hlsRef = useRef<Hls | null>(null);
 
   const [deitado, setDeitado] = useState(false);
-  const [volume, setVolume] = useState(() => {
-    // Sempre le o volume salvo, TV ou celular. Antes a TV ignorava o valor
-    // salvo e forcava 100% a cada canal reaberto: parecia que o volume
-    // "pulava" sozinho, quando na verdade era o app jogando fora o nivel
-    // que a pessoa tinha deixado.
-    const salvo = localStorage.getItem('vovo_tv_volume');
-    if (salvo !== null) {
-      const v = parseFloat(salvo);
-      if (!isNaN(v) && v >= 0 && v <= 1) return v;
-    }
-    return isTv ? 1.0 : 0.5; // sem nada salvo ainda: TV comeca no maximo, celular em 50%
-  });
-  const volumeRef = useRef(volume);
-  useEffect(() => {
-    volumeRef.current = volume;
-  }, [volume]);
-
-  const [brilho, setBrilho] = useState(() => {
-    const salvo = localStorage.getItem('vovo_tv_brightness');
-    return salvo !== null ? parseFloat(salvo) : 0.75;
-  });
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [mostrarControles, setMostrarControles] = useState(true);
   const [tocando, setTocando] = useState(true);
-  const [mudo, setMudo] = useState(false);
-  const mudoRef = useRef(mudo);
-  useEffect(() => {
-    mudoRef.current = mudo;
-  }, [mudo]);
   /** Sobe a cada "tentar de novo" e refaz a carga do stream do zero. */
   const [tentativa, setTentativa] = useState(0);
 
@@ -200,10 +167,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const toqueRef = useRef({
     x: 0,
     y: 0,
-    volumeInicial: 1.0,
-    brilhoInicial: 1.0,
-    ladoEsquerdo: false,
-    ladoDireito: false,
     centro: false,
     moveu: false
   });
@@ -268,8 +231,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
    */
   useEffect(() => {
     tv.keepAwake(true);
+    tv.setBrightness(1.0);
     return () => {
-      tv.resetBrightness();
       tv.setImmersive(false);
     };
   }, []);
@@ -492,8 +455,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       encerrado = true;
       window.clearTimeout(relogio);
       if (video) {
-        video.volume = volumeRef.current;
-        video.muted = mudoRef.current;
+        video.volume = 1.0;
+        video.muted = false;
       }
       setCarregando(false);
       setErro(null);
@@ -581,8 +544,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
 
         if (video) {
-          video.volume = volumeRef.current;
-          video.muted = mudoRef.current;
+          video.volume = 1.0;
+          video.muted = false;
         }
 
         video.play().then(sucesso).catch(() => {
@@ -623,8 +586,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       hlsRef.current = hls;
     } else {
       video.src = comPassePluto(endereco);
-      video.volume = volumeRef.current;
-      video.muted = mudoRef.current;
+      video.volume = 1.0;
+      video.muted = false;
       video.play().then(sucesso).catch(() => falha('nao consegui iniciar'));
     }
 
@@ -650,18 +613,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // no meio da exibicao. Endereco igual = nada para refazer.
   }, [endereco, temReserva, tentativa, tvConectada, onPlaybackOk, onPlaybackFail, onChannelExhausted]);
   // indiceFonte fica de fora de proposito: ele so muda junto com o endereco
-
-  /**
-   * Mantem o volume persistido e ajusta no elemento de video.
-   */
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video) {
-      video.volume = volume;
-      video.muted = mudo;
-    }
-    localStorage.setItem('vovo_tv_volume', volume.toString());
-  }, [volume, mudo]);
 
   /**
    * Modo imersivo e tela cheia permanente na TV.
@@ -717,46 +668,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
     reiniciarControles();
   }, [reiniciarControles]);
-
-  const alternarMudo = useCallback(() => {
-    setMudo((anterior) => {
-      const proximo = !anterior;
-      dispararHud('volume', proximo ? 0 : Math.round(volume * 100));
-      return proximo;
-    });
-    reiniciarControles();
-  }, [dispararHud, reiniciarControles, volume]);
-
-  const ajustarVolume = useCallback(
-    (delta: number) => {
-      setMudo(false);
-      setVolume((anterior) => {
-        const proximo = Math.min(1, Math.max(0, Math.round((anterior + delta) * 20) / 20));
-        dispararHud('volume', Math.round(proximo * 100));
-        if (videoRef.current) {
-          videoRef.current.volume = proximo;
-          videoRef.current.muted = false;
-        }
-        localStorage.setItem('vovo_tv_volume', proximo.toString());
-        return proximo;
-      });
-      reiniciarControles();
-    },
-    [dispararHud, reiniciarControles]
-  );
-
-  /** Brilho em 4 degraus, para a vovo so ir tocando no solzinho. */
-  const alternarBrilho = useCallback(() => {
-    setBrilho((anterior) => {
-      const indice = PASSOS_BRILHO.findIndex((passo) => Math.abs(passo - anterior) < 0.05);
-      const proximo = PASSOS_BRILHO[(indice + 1) % PASSOS_BRILHO.length];
-      localStorage.setItem('vovo_tv_brightness', proximo.toString());
-      tv.setBrightness(proximo);
-      dispararHud('brilho', Math.round(proximo * 100));
-      return proximo;
-    });
-    reiniciarControles();
-  }, [dispararHud, reiniciarControles]);
 
   const tentarDeNovo = useCallback(() => {
     setIndiceFonte(0);
@@ -868,9 +779,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         reiniciarControles();
-      } else if (e.key === 'm' || e.key === 'M' || e.key === 'VolumeMute') {
-        e.preventDefault();
-        alternarMudo();
       }
     };
 
@@ -892,7 +800,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       window.removeEventListener('vovo:play_pause', handlePlayPause);
       window.removeEventListener('vovo:back', handleBack);
     };
-  }, [isTv, onPrevChannel, onNextChannel, alternarPlay, alternarMudo, reiniciarControles, abrirGuia, digitar]);
+  }, [isTv, onPrevChannel, onNextChannel, alternarPlay, reiniciarControles, abrirGuia, digitar]);
 
   // --------------------------------------------------------------- gestos
 
@@ -904,11 +812,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     toqueRef.current = {
       x: toque.clientX,
       y: toque.clientY,
-      volumeInicial: volume,
-      brilhoInicial: brilho,
-      ladoEsquerdo: toque.clientX < largura * 0.35,
-      ladoDireito: toque.clientX > largura * 0.65,
-      centro: toque.clientX >= largura * 0.35 && toque.clientX <= largura * 0.65,
+      centro: toque.clientX >= largura * 0.25 && toque.clientX <= largura * 0.75,
       moveu: false
     };
   };
@@ -921,26 +825,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const inicio = toqueRef.current;
     const dx = toque.clientX - inicio.x;
     const dy = toque.clientY - inicio.y;
-    const altura = window.innerHeight;
 
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) inicio.moveu = true;
-
-    const verticalDominante = Math.abs(dy) > Math.abs(dx) * 1.2 && Math.abs(dy) > 12;
-
-    if (inicio.ladoEsquerdo && verticalDominante && !radio) {
-      const novo = Math.min(1, Math.max(0.1, inicio.brilhoInicial - dy / (altura * 0.45)));
-      setBrilho(novo);
-      localStorage.setItem('vovo_tv_brightness', novo.toString());
-      tv.setBrightness(novo);
-      dispararHud('brilho', Math.round(novo * 100));
-      return;
-    }
-
-    if (inicio.ladoDireito && verticalDominante) {
-      const novo = Math.min(1, Math.max(0, inicio.volumeInicial - dy / (altura * 0.45)));
-      setVolume(novo);
-      dispararHud('volume', Math.round(novo * 100));
-    }
   };
 
   const fimToque = (e: React.TouchEvent) => {
@@ -1018,32 +904,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         ref={(el) => {
           (videoRef as any).current = el;
           if (el) {
-            el.volume = volumeRef.current;
-            el.muted = mudoRef.current;
+            el.volume = 1.0;
+            el.muted = false;
           }
         }}
         onLoadedMetadata={(e) => {
-          e.currentTarget.volume = volumeRef.current;
-          e.currentTarget.muted = mudoRef.current;
+          e.currentTarget.volume = 1.0;
+          e.currentTarget.muted = false;
         }}
         onPlay={(e) => {
-          e.currentTarget.volume = volumeRef.current;
-          e.currentTarget.muted = mudoRef.current;
+          e.currentTarget.volume = 1.0;
+          e.currentTarget.muted = false;
           setTocando(true);
         }}
         onPlaying={(e) => {
-          e.currentTarget.volume = volumeRef.current;
-          e.currentTarget.muted = mudoRef.current;
+          e.currentTarget.volume = 1.0;
+          e.currentTarget.muted = false;
         }}
         onPause={() => setTocando(false)}
         playsInline
         className={`h-full w-full object-contain ${radio ? 'hidden' : 'block'}`}
-      />
-
-      {/* Escurecedor do brilho */}
-      <div
-        className="pointer-events-none absolute inset-0 transition-opacity"
-        style={{ backgroundColor: 'black', opacity: 1 - brilho }}
       />
 
       {/* Tela do radio: sem video, so a marca e o nome */}
@@ -1197,36 +1077,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <span className="line-clamp-2 text-lg leading-snug font-black text-white">{nomeCanal}</span>
       </div>
 
-      {/* Aviso de gesto */}
-      {hud && (
+      {/* Aviso de troca rapida de canal */}
+      {hud && hud.tipo === 'canal' && (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
           <div className="flex min-w-[12rem] flex-col items-center gap-3 rounded-3xl border border-noite-500 bg-noite-900/95 px-7 py-5">
-            {hud.tipo === 'volume' && (
-              <>
-                <Volume2 className="h-11 w-11 text-sol-400" strokeWidth={2.5} />
-                <span className="text-2xl font-black text-white">{hud.valor}%</span>
-                <div className="h-3 w-36 overflow-hidden rounded-full bg-noite-700">
-                  <div className="h-full bg-sol-400" style={{ width: `${hud.valor}%` }} />
-                </div>
-                <span className="text-base font-bold text-tinta-300">Volume</span>
-              </>
-            )}
-            {hud.tipo === 'brilho' && (
-              <>
-                <Sun className="h-11 w-11 text-sol-400" strokeWidth={2.5} />
-                <span className="text-2xl font-black text-white">{hud.valor}%</span>
-                <div className="h-3 w-36 overflow-hidden rounded-full bg-noite-700">
-                  <div className="h-full bg-sol-400" style={{ width: `${hud.valor}%` }} />
-                </div>
-                <span className="text-base font-bold text-tinta-300">Brilho</span>
-              </>
-            )}
-            {hud.tipo === 'canal' && (
-              <>
-                <Tv className="h-11 w-11 text-sol-400" strokeWidth={2.5} />
-                <span className="text-center text-xl font-black text-white">{hud.valor}</span>
-              </>
-            )}
+            <Tv className="h-11 w-11 text-sol-400" strokeWidth={2.5} />
+            <span className="text-center text-xl font-black text-white">{hud.valor}</span>
           </div>
         </div>
       )}
@@ -1350,89 +1206,96 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       </div>
 
-      {/* Barra de baixo (so para assistindo no celular; espelhado usa o controle dedicado acima) */}
-      {!tvConectada && (
-      <div
-        className={`area-segura-base absolute right-0 bottom-0 left-0 z-50 bg-gradient-to-t from-black/95 to-transparent px-3 pt-10 transition-opacity duration-300 ${controlesVisiveis}`}
-        {...pararPropagacao}
-      >
-        {!isTv && !radio && guiaNoAr.agora && (
-          <div className="mx-auto mb-3 max-w-md rounded-2xl border border-white/15 bg-noite-900/90 px-4 py-2 text-center">
-            <p className="truncate text-base font-black text-sol-400">
-              Agora: {guiaNoAr.agora.titulo}
-            </p>
-            <p className="text-sm font-bold text-tinta-100">
-              {horarioDoPrograma(guiaNoAr.agora)}
-            </p>
+      {/* Barra unica de baixo no celular: mostra informacoes do programa e botoes essenciais sem sobreposicao */}
+      {!tvConectada && !isTv && (
+        <div
+          className={`area-segura-base absolute right-0 bottom-0 left-0 z-50 bg-gradient-to-t from-black/95 via-black/80 to-transparent px-4 pt-12 transition-opacity duration-300 ${controlesVisiveis}`}
+          {...pararPropagacao}
+        >
+          <div className="mx-auto max-w-xl">
+            <div className="mb-3 rounded-2xl border border-white/15 bg-noite-900/90 px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                {typeof numero === 'number' && (
+                  <span className="shrink-0 rounded-lg bg-sol-400 px-2 py-0.5 text-sm font-black text-noite-900">
+                    {numero}
+                  </span>
+                )}
+                <p className="truncate text-lg font-black text-white">{nomeCanal}</p>
+              </div>
+              {!radio && guiaNoAr.agora ? (
+                <>
+                  <p className="mt-1 truncate text-base font-black text-sol-400">
+                    Agora: {guiaNoAr.agora.titulo}
+                  </p>
+                  <p className="text-sm font-bold text-tinta-100">
+                    {horarioDoPrograma(guiaNoAr.agora)}
+                  </p>
+                  {(() => {
+                    const pct = progressoDoPrograma(guiaNoAr.agora);
+                    if (pct === null) return null;
+                    return (
+                      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/15">
+                        <div className="h-full rounded-full bg-sol-400" style={{ width: `${pct}%` }} />
+                      </div>
+                    );
+                  })()}
+                  {guiaNoAr.depois && (
+                    <p className="mt-1 truncate text-xs font-semibold text-tinta-300">
+                      Depois ({horaCurta(guiaNoAr.depois.inicio)}): {guiaNoAr.depois.titulo}
+                    </p>
+                  )}
+                </>
+              ) : (
+                channel.group && <p className="mt-0.5 truncate text-sm font-bold text-tinta-300">{channel.group}</p>
+              )}
+            </div>
+
+            {!radio && !deitado && (
+              <p className="mb-2.5 text-center text-sm font-bold text-tinta-300">
+                Deite o celular para ver em tela cheia
+              </p>
+            )}
+
+            <div className="flex items-stretch justify-center gap-2.5">
+              {onPrevChannel && (
+                <button
+                  onClick={() => {
+                    onPrevChannel();
+                    reiniciarControles();
+                  }}
+                  className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
+                  aria-label="Canal anterior"
+                >
+                  <ChevronLeft className="h-6 w-6 text-sol-400" strokeWidth={3} />
+                  <span className="text-sm font-black">Anterior</span>
+                </button>
+              )}
+
+              <button
+                onClick={alternarPlay}
+                className="flex h-14 min-w-[7rem] flex-1 items-center justify-center gap-2 rounded-2xl bg-sol-400 px-4 text-noite-900 transition active:scale-95"
+                aria-label={tocando ? 'Pausar' : 'Continuar'}
+              >
+                {tocando ? <Pause className="h-6 w-6 fill-current" /> : <Play className="h-6 w-6 fill-current" />}
+                <span className="text-sm font-black">{tocando ? 'Pausar' : 'Continuar'}</span>
+              </button>
+
+              {onNextChannel && (
+                <button
+                  onClick={() => {
+                    onNextChannel();
+                    reiniciarControles();
+                  }}
+                  className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
+                  aria-label="Próximo canal"
+                >
+                  <span className="text-sm font-black">Próximo</span>
+                  <ChevronRight className="h-6 w-6 text-sol-400" strokeWidth={3} />
+                </button>
+              )}
+            </div>
           </div>
-        )}
-        {!isTv && !radio && !deitado && (
-          <p className="mb-3 text-center text-base font-bold text-tinta-300">
-            Deite o celular para ver em tela cheia
-          </p>
-        )}
-
-        <div className="flex items-stretch justify-center gap-2">
-          <button
-            onClick={alternarMudo}
-            className={`flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 px-3 transition active:scale-95 ${
-              mudo
-                ? 'border-morto-400 bg-morto-400/20 text-morto-400'
-                : 'border-noite-500 bg-noite-900/90 text-white'
-            }`}
-            aria-label={mudo ? 'Ligar o som' : 'Desligar o som'}
-          >
-            {mudo ? <VolumeX className="h-7 w-7" strokeWidth={2.5} /> : <Volume2 className="h-7 w-7" strokeWidth={2.5} />}
-            <span className="text-xs font-black">{mudo ? 'Sem som' : 'Mudo'}</span>
-          </button>
-
-          {!isTv && (
-            <button
-              onClick={() => ajustarVolume(-0.1)}
-              className="flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
-              aria-label="Abaixar o volume"
-            >
-              <Minus className="h-7 w-7 text-sol-400" strokeWidth={3} />
-              <span className="text-xs font-black">Volume</span>
-            </button>
-          )}
-
-          {/* Canal ao vivo: pausar e retomar so pula pra frente no tempo (nao
-              existe "de onde parei"), confunde mais do que ajuda na TV. */}
-          {!isTv && (
-            <button
-              onClick={alternarPlay}
-              className="flex h-16 min-w-20 flex-col items-center justify-center gap-0.5 rounded-2xl bg-sol-400 px-4 text-noite-900 transition active:scale-95"
-              aria-label={tocando ? 'Pausar' : 'Continuar'}
-            >
-              {tocando ? <Pause className="h-8 w-8 fill-current" /> : <Play className="h-8 w-8 fill-current" />}
-              <span className="text-xs font-black">{tocando ? 'Pausar' : 'Continuar'}</span>
-            </button>
-          )}
-
-          {!isTv && (
-            <button
-              onClick={() => ajustarVolume(0.1)}
-              className="flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
-              aria-label="Aumentar o volume"
-            >
-              <Plus className="h-7 w-7 text-sol-400" strokeWidth={3} />
-              <span className="text-xs font-black">Volume</span>
-            </button>
-          )}
-
-          {!isTv && !radio && (
-            <button
-              onClick={alternarBrilho}
-              className="flex h-16 min-w-16 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3 text-white transition active:scale-95"
-              aria-label="Mudar o brilho da tela"
-            >
-              <Sun className="h-7 w-7 text-sol-400" strokeWidth={2.5} />
-              <span className="text-xs font-black">{Math.round(brilho * 100)}%</span>
-            </button>
-          )}
         </div>
-      </div>
       )}
 
       {/* Gaveta de canais */}
@@ -1518,7 +1381,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {!radio && !tvConectada && (
+      {isTv && !radio && !tvConectada && (
         <FaixaDoCanal
           numero={numero}
           nome={nomeCanal}
@@ -1526,7 +1389,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           categoria={channel.group}
           epg={channel.epg}
           reacender={reacender}
-          acimaDosControles={barrasNaTela}
+          acimaDosControles={false}
         />
       )}
 

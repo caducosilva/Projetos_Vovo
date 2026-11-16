@@ -15,9 +15,10 @@ export default function App() {
     tv.exitApp();
   }, []);
 
-  // Mantem a tela sempre ligada em qualquer tela do app enquanto estiver aberto
+  // Mantem a tela sempre ligada e no brilho maximo em qualquer tela do app
   useEffect(() => {
     void tv.keepAwake(true);
+    void tv.setBrightness(1.0);
     tv.getDeviceType().then((r) => {
       if (r?.isTv) document.documentElement.classList.add('tv');
     });
@@ -27,6 +28,7 @@ export default function App() {
     let ativo = true;
     const checar = () => {
       void tv.keepAwake(true);
+      void tv.setBrightness(1.0);
       void checkForUpdate(true).then((nova) => {
         if (ativo && nova) setAtualizacao(nova);
       });

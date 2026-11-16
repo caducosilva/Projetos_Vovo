@@ -27,7 +27,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(CastBridge.class);
         registerPlugin(UpdateBridge.class);
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        aplicarTelaAcesaEBrilhoMaximo();
 
         try {
             WebView webView = getBridge().getWebView();
@@ -58,10 +58,17 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private void aplicarTelaAcesaEBrilhoMaximo() {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        params.screenBrightness = 1.0f;
+        getWindow().setAttributes(params);
+    }
+
     @Override
     public void onResume() {
         super.onResume();
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        aplicarTelaAcesaEBrilhoMaximo();
     }
 
     @Override
