@@ -306,7 +306,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
 
         <section>
           <h3 className="mb-1 text-xl font-black text-tinta-100">Versão</h3>
-          <p className="mb-3 text-base text-tinta-300">TV da Vovó {versao}</p>
+          <p className="mb-3 text-base text-tinta-300">CLARICE TV {versao}</p>
 
           {isNative && (
             <button

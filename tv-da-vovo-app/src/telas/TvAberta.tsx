@@ -14,8 +14,12 @@ import type { HealthMap, ProbeResult } from '../utils/health';
 import type { AvailableUpdate } from '../utils/updater';
 import { dedupe } from '../utils/channelList';
 import { fontesDoCanal, saudeDoCanal, compararPorNome } from '../utils/fontes';
+import { limparCacheAntigoDeFontes } from '../utils/corrida';
 import { buscarCanaisDeCamera, ehCanalDeCamera } from '../utils/cameras';
+import { carregarCanaisEmCache, buscarCanaisRemotos } from '../utils/canaisRemotos';
 import { tv } from '../utils/tvBridge';
+import { pararNaTv, type TvNaRede } from '../utils/tvsDaCasa';
+import { cleanChannelName } from '../utils/channelName';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Header } from '../components/Header';
 import { ChannelCard } from '../components/ChannelCard';
@@ -40,26 +44,41 @@ const COLS = 5;
  * cada teste de saude e a vovo perdia a referencia de onde o canal estava.
  */
 const CONHECIDAS = ['globo', 'record', 'sbt', 'band', 'redetv'];
+const ORDEM_PADRAO = new Map(
+  (defaultChannelsData as Channel[]).map((c, idx) => [c.id || c.url, idx])
+);
 
-function blocoDoCanal(canal: Channel): number {
-  if (ehCanalDeCamera(canal)) return 0;
+function pesoDoCanal(canal: Channel): number {
+  if (ehCanalDeCamera(canal)) return -1;
+  const pos = ORDEM_PADRAO.get(canal.id || canal.url);
+  if (pos !== undefined) return pos;
   const nome = (canal.name || '').toLowerCase();
-  if (CONHECIDAS.some((marca) => nome.includes(marca))) return 1;
-  return 2;
+  if (CONHECIDAS.some((marca) => nome.includes(marca))) return 500;
+  return 1000;
 }
+
+type CategoriaFiltro = 'todos' | 'abertos' | 'noticias';
 
 export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => void }) {
   const [channels, setChannels] = useState<Channel[]>(() => {
+    const base = carregarCanaisEmCache() ?? (defaultChannelsData as Channel[]);
     try {
       const salvos = localStorage.getItem('vovo_tv_custom_channels');
       const proprios: Channel[] = salvos ? JSON.parse(salvos) : [];
-      return dedupe([...(defaultChannelsData as Channel[]), ...proprios]);
+      return dedupe([...base, ...proprios]);
     } catch {
-      return dedupe(defaultChannelsData as Channel[]);
+      return dedupe(base);
     }
   });
 
-  const [health, setHealth] = useState<HealthMap>(() => loadHealth());
+  const [health, setHealth] = useState<HealthMap>(() => {
+    limparCacheAntigoDeFontes('2');
+    return loadHealth();
+  });
+  const [categoria, setCategoria] = useState<CategoriaFiltro>('todos');
+  const [avisoSair, setAvisoSair] = useState(false);
+  const ultimoVoltarRef = useRef(0);
+  const avisoTimerRef = useRef<number | null>(null);
   const healthRef = useRef<HealthMap>(health);
   const [probeState, setProbeState] = useState({ running: false, done: 0, total: 0 });
   const pararRef = useRef(false);
@@ -75,6 +94,21 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
 
   const [ajustesAbertos, setAjustesAbertos] = useState(false);
   const [atualizacao, setAtualizacao] = useState<AvailableUpdate | null>(null);
+  const [tvConectada, setTvConectada] = useState<TvNaRede | null>(null);
+  const [canalNaTv, setCanalNaTv] = useState('');
+
+  const desconectarTv = useCallback(async () => {
+    const atual = tvConectada;
+    setTvConectada(null);
+    setCanalNaTv('');
+    if (atual) {
+      try {
+        await pararNaTv(atual);
+      } catch {
+        /* a TV pode ter sido desligada */
+      }
+    }
+  }, [tvConectada]);
 
   // Smart TV (sem toque, controlada por controle remoto) x celular
   const [souTv, setSouTv] = useState(false);
@@ -84,9 +118,24 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
     });
   }, []);
 
-  // Voltar na grade leva para a tela inicial (TV Aberta x Cine Zap). Quem
-  // sai do app e a tela inicial, com o duplo Voltar dela.
-  const tentarSairDoApp = onVoltarInicio;
+  // Na grade principal, pede Voltar duas vezes para sair do app sem fechar por engano.
+  const tentarSairDoApp = useCallback(() => {
+    const agora = Date.now();
+    if (agora - ultimoVoltarRef.current < 2000) {
+      onVoltarInicio();
+      return;
+    }
+    ultimoVoltarRef.current = agora;
+    setAvisoSair(true);
+    if (avisoTimerRef.current) window.clearTimeout(avisoTimerRef.current);
+    avisoTimerRef.current = window.setTimeout(() => setAvisoSair(false), 2000);
+  }, [onVoltarInicio]);
+
+  useEffect(() => {
+    return () => {
+      if (avisoTimerRef.current) window.clearTimeout(avisoTimerRef.current);
+    };
+  }, []);
 
   // Fecha modais ou sai do app ao apertar Voltar 2x no controle remoto ou ESC no teclado
   useEffect(() => {
@@ -284,6 +333,40 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
     };
   }, [carregarCameras]);
 
+  // Busca grade atualizada no GitHub sempre que abre ou volta ao aplicativo,
+  // para que qualquer link novo de canal entre sem precisar reinstalar APK.
+  const sincronizarCanaisRemotos = useCallback(async (sinal?: AbortSignal) => {
+    const remotos = await buscarCanaisRemotos(sinal);
+    if (!remotos) return;
+    setChannels((anterior) => {
+      const cameras = anterior.filter((c) => ehCanalDeCamera(c));
+      const proprios = anterior.filter((c) => c.isCustom && !ehCanalDeCamera(c));
+      return dedupe([...cameras, ...remotos, ...proprios]);
+    });
+  }, []);
+
+  useEffect(() => {
+    const controle = new AbortController();
+    let ativo = true;
+    void sincronizarCanaisRemotos(controle.signal);
+
+    let remover: (() => void) | null = null;
+    CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive && ativo) void sincronizarCanaisRemotos();
+    })
+      .then((h) => {
+        if (!ativo) h.remove();
+        else remover = () => h.remove();
+      })
+      .catch(() => undefined);
+
+    return () => {
+      ativo = false;
+      controle.abort();
+      if (remover) remover();
+    };
+  }, [sincronizarCanaisRemotos]);
+
   const handleImportChannels = useCallback((novos: Channel[]) => {
     setChannels((anterior) => {
       const unicos = dedupe([...novos, ...anterior]);
@@ -330,18 +413,20 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
   const filteredChannels = useMemo<ChannelWithHealth[]>(() => {
     const saida = enrichedChannels.filter((canal) => {
       if (canal.health === 'dead' && !ehCanalDeCamera(canal)) return false;
+      if (categoria === 'noticias' && canal.group !== 'Notícias') return false;
+      if (categoria === 'abertos' && canal.group === 'Notícias') return false;
       return true;
     });
 
     saida.sort((a, b) => {
-      const blocoA = blocoDoCanal(a);
-      const blocoB = blocoDoCanal(b);
-      if (blocoA !== blocoB) return blocoA - blocoB;
+      const pesoA = pesoDoCanal(a);
+      const pesoB = pesoDoCanal(b);
+      if (pesoA !== pesoB) return pesoA - pesoB;
       return compararPorNome(a, b);
     });
 
     return saida;
-  }, [enrichedChannels]);
+  }, [enrichedChannels, categoria]);
 
   const visibleChannels = useMemo(
     () => filteredChannels.slice(0, visibleCount),
@@ -365,14 +450,11 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
    */
   const jaAbriuSozinhoRef = useRef(false);
   useEffect(() => {
-    if (jaAbriuSozinhoRef.current || filteredChannels.length === 0) return;
+    if (!souTv || jaAbriuSozinhoRef.current || filteredChannels.length === 0) return;
     jaAbriuSozinhoRef.current = true;
-    // Procura a Globo na lista INTEIRA, nao na filtrada: um "morto" antigo no
-    // mapa de saude escondia a Globo da grade e o app abria noutro canal. Se
-    // uma fonte dela estiver fora, o proprio player cai para a seguinte.
     const globo = enrichedChannels.find((c) => /globo/i.test(c.name || ''));
     abrirCanal(globo ?? filteredChannels[0]);
-  }, [enrichedChannels, filteredChannels, abrirCanal]);
+  }, [souTv, enrichedChannels, filteredChannels, abrirCanal]);
 
 
   const indiceAtual = useMemo(() => {
@@ -477,20 +559,54 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
   return (
     <div className="flex min-h-screen flex-col bg-noite-900 text-tinta-100">
       <div className="sticky top-0 z-40">
-        <Header channelCount={filteredChannels.length} />
+        <Header
+          channelCount={filteredChannels.length}
+          tvConectadaNome={tvConectada?.name}
+          canalNaTvNome={canalNaTv}
+          onDesconectarTv={() => void desconectarTv()}
+        />
       </div>
 
-      <main className="area-segura-lados area-segura-base mx-auto w-full max-w-[1750px] flex-1 px-5 py-4">
+      <main className="area-segura-lados area-segura-base mx-auto w-full max-w-[1750px] flex-1 overflow-x-hidden px-4 py-4 sm:px-6">
+        <div className="mb-4 flex gap-2">
+          {(
+            [
+              ['todos', 'Todos'],
+              ['abertos', 'TV Aberta'],
+              ['noticias', 'Notícias'],
+            ] as const
+          ).map(([id, label]) => {
+            const ativo = categoria === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => {
+                  setCategoria(id);
+                  setFocusedIndex(0);
+                }}
+                className={`min-h-12 flex-1 rounded-2xl border-2 px-3 py-2 text-base font-black transition active:scale-95 sm:flex-none sm:px-5 ${
+                  ativo
+                    ? 'border-sol-400 bg-sol-400 text-noite-900'
+                    : 'border-noite-500 bg-noite-800 text-tinta-100'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
         {filteredChannels.length > 0 ? (
           <>
-            {/* Grade de exatamente 5 canais por linha para Smart TV */}
-            <div className="grid grid-cols-5 gap-4">
+            {/* Grade responsiva: 2 colunas grandes no celular, 3 no tablet, 5 na TV */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5">
               {visibleChannels.map((canal, idx) => (
                 <div key={canal.url} data-card-index={idx}>
                   <ChannelCard
                     channel={canal}
                     numero={idx + 1}
-                    isFocused={topNav === 'none' && idx === focusedIndex}
+                    isFocused={souTv && topNav === 'none' && idx === focusedIndex}
                     onSelect={(c) => {
                       setFocusedIndex(idx);
                       abrirCanal(c);
@@ -526,14 +642,31 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
           numero={indiceAtual + 1}
           isTv={souTv}
           channelList={playerList}
-          onSelectChannel={(canal) => setActiveChannel(canal as ChannelWithHealth)}
-          // Voltar duas vezes no player leva direto para a escolha de TV
-          onClose={onVoltarInicio}
+          tvConectada={tvConectada}
+          onTvConectada={(aparelho, nome) => {
+            setTvConectada(aparelho);
+            setCanalNaTv(nome);
+          }}
+          onDesconectarTv={desconectarTv}
+          onSelectChannel={(canal) => {
+            setActiveChannel(canal as ChannelWithHealth);
+            if (tvConectada) setCanalNaTv(cleanChannelName(canal.name));
+          }}
+          onClose={() => setActiveChannel(null)}
           onPrevChannel={playerList.length > 1 ? () => irParaCanal(-1) : undefined}
           onNextChannel={playerList.length > 1 ? () => irParaCanal(1) : undefined}
           onPlaybackOk={handlePlaybackOk}
           onPlaybackFail={handlePlaybackFail}
         />
+      )}
+
+      {avisoSair && (
+        <div
+          role="status"
+          className="fixed bottom-10 left-1/2 z-50 -translate-x-1/2 rounded-full border-2 border-sol-400 bg-noite-800 px-6 py-3 text-base font-black text-tinta-100 shadow-2xl sm:text-xl"
+        >
+          Aperte Voltar de novo para sair
+        </div>
       )}
 
       <SettingsSheet

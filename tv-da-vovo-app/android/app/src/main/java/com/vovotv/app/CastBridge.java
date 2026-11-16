@@ -82,6 +82,8 @@ public class CastBridge extends Plugin {
 
     /** Chamada de cast em andamento: existe uma de cada vez, a ultima manda. */
     private PluginCall emAndamento;
+    private String ultimoDeviceIdTentado;
+    private String dispositivoConectadoId;
     private SessionManagerListener<CastSession> ouvinteSessao;
     private RemoteMediaClient.Callback ouvinteMidia;
     private RemoteMediaClient playerAtual;
@@ -219,7 +221,7 @@ public class CastBridge extends Plugin {
     public void cast(PluginCall call) {
         final String deviceId = call.getString("deviceId", "");
         final String url = call.getString("url", "");
-        final String titulo = call.getString("title", "Vovo TV");
+        final String titulo = call.getString("title", "CLARICE TV");
         if (deviceId == null || deviceId.isEmpty() || url == null || url.isEmpty()) {
             call.reject("Faltou dizer qual TV e qual canal.");
             return;
@@ -243,7 +245,20 @@ public class CastBridge extends Plugin {
             return;
         }
         emAndamento = call;
+        ultimoDeviceIdTentado = deviceId;
         MediaRouter router = MediaRouter.getInstance(getContext());
+
+        CastSession atual = contexto.getSessionManager().getCurrentCastSession();
+        MediaRouter.RouteInfo rotaJaAtiva = rotaAtual(router, deviceId);
+        if (atual != null && atual.isConnected()
+            && (deviceId.equals(dispositivoConectadoId)
+                || (rotaJaAtiva != null && rotaJaAtiva.isSelected()))) {
+            String nomeTv = atual.getCastDevice() != null ? atual.getCastDevice().getFriendlyName() : "TV";
+            progresso("conectado", "Trocando canal na " + nomeTv + "...", null);
+            enviarMidia(atual, url, titulo);
+            return;
+        }
+
         // Volta para a varredura ativa: e o que a tela de escolha do proprio
         // Google faz enquanto esta aberta, e e ela que traz a rota de volta.
         ouvirRotas(router, MediaRouter.CALLBACK_FLAG_PERFORM_ACTIVE_SCAN);
@@ -378,6 +393,7 @@ public class CastBridge extends Plugin {
             .build()
         ).setResultCallback(resultado -> {
             if (resultado.getStatus().isSuccess()) {
+                dispositivoConectadoId = ultimoDeviceIdTentado;
                 progresso("aceito", "A TV aceitou o canal", "carregando o video");
                 JSObject ret = new JSObject();
                 ret.put("ok", true);
@@ -442,6 +458,8 @@ public class CastBridge extends Plugin {
     public void stop(PluginCall call) {
         principal.post(() -> {
             pararDeAcompanhar();
+            dispositivoConectadoId = null;
+            ultimoDeviceIdTentado = null;
             CastContext contexto = contexto();
             if (contexto != null) {
                 contexto.getSessionManager().endCurrentSession(true);

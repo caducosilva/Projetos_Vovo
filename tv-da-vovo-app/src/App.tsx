@@ -1,47 +1,58 @@
 import { useCallback, useEffect, useState } from 'react';
-import Inicio, { type Destino } from './telas/Inicio';
+import { App as CapacitorApp } from '@capacitor/app';
 import TvAberta from './telas/TvAberta';
-import CineZap from './telas/CineZap';
 import { UpdatePrompt } from './components/UpdatePrompt';
 import { checkForUpdate, type AvailableUpdate } from './utils/updater';
 import { tv } from './utils/tvBridge';
 
-type Tela = 'inicio' | Destino;
-
 /**
- * TV da Vovo: um app so com as duas TVs.
- *
- *   inicio  -> dois botoes grandes: TV Aberta ou Cine Zap
- *   abertos -> canais abertos (liga direto na Globo, Voltar mostra a grade)
- *   cine    -> canais de filme, serie e desenho, no estilo zapear
- *
- * Voltar dentro de qualquer uma das duas traz de volta para o inicio. Quem
- * desliga o app e o inicio, com Voltar duas vezes.
+ * CLARICE TV: acesso direto aos canais abertos de SP/Mogi das Cruzes e noticias.
  */
 export default function App() {
-  const [tela, setTela] = useState<Tela>('inicio');
   const [atualizacao, setAtualizacao] = useState<AvailableUpdate | null>(null);
 
-  const voltarInicio = useCallback(() => setTela('inicio'), []);
+  const sairDoApp = useCallback(() => {
+    tv.exitApp();
+  }, []);
 
-  // escala de TV (ver index.css, html.tv)
+  // Mantem a tela sempre ligada em qualquer tela do app enquanto estiver aberto
   useEffect(() => {
+    void tv.keepAwake(true);
     tv.getDeviceType().then((r) => {
       if (r?.isTv) document.documentElement.classList.add('tv');
     });
   }, []);
 
   useEffect(() => {
-    checkForUpdate().then((nova) => {
-      if (nova) setAtualizacao(nova);
-    });
+    let ativo = true;
+    const checar = () => {
+      void tv.keepAwake(true);
+      void checkForUpdate(true).then((nova) => {
+        if (ativo && nova) setAtualizacao(nova);
+      });
+    };
+
+    checar();
+
+    let remover: (() => void) | null = null;
+    CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) checar();
+    })
+      .then((h) => {
+        if (!ativo) h.remove();
+        else remover = () => h.remove();
+      })
+      .catch(() => undefined);
+
+    return () => {
+      ativo = false;
+      if (remover) remover();
+    };
   }, []);
 
   return (
     <>
-      {tela === 'inicio' && <Inicio onEscolher={setTela} />}
-      {tela === 'abertos' && <TvAberta onVoltarInicio={voltarInicio} />}
-      {tela === 'cine' && <CineZap onVoltar={voltarInicio} />}
+      <TvAberta onVoltarInicio={sairDoApp} />
       <UpdatePrompt update={atualizacao} onDismiss={() => setAtualizacao(null)} />
     </>
   );

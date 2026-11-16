@@ -278,7 +278,7 @@ public class TvBridge extends Plugin {
     @PluginMethod
     public void sendToExternalPlayer(PluginCall call) {
         String url = call.getString("url");
-        String title = call.getString("title", "Vovo TV");
+        String title = call.getString("title", "CLARICE TV");
         if (url == null || url.isEmpty()) {
             call.reject("url vazia");
             return;

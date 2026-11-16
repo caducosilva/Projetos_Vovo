@@ -17,18 +17,18 @@
   --color-noite-600: #232c3b;
   --color-noite-500: #33404f;
 
-  /* Acao principal: amarelo quente, o unico tom saturado da tela */
-  --color-sol-400: #fbbf24;
-  --color-sol-500: #f0a815;
-  --color-sol-600: #c9860a;
+  /* Acao principal: ambar suave e confortavel para leitura noturna */
+  --color-sol-400: #d9a426;
+  --color-sol-500: #c28e19;
+  --color-sol-600: #a67610;
 
   /* Cine Zap: vermelho de cinema, com texto branco acima de 6:1 */
   --color-cine-600: #be123c;
 
   /* Texto */
-  --color-tinta-100: #f7fafc;
-  --color-tinta-300: #c2ccd9;
-  --color-tinta-500: #8b98a9;
+  --color-tinta-100: #e7edf4;
+  --color-tinta-300: #b8c3d1;
+  --color-tinta-500: #8592a3;
 
   /* Sinais de estado */
   --color-vivo-400: #34d399;
@@ -80,17 +80,16 @@
     touch-action: manipulation;
   }
 
-  /* Foco de alto contraste para controle remoto de Smart TV Philips / Android TV */
+  /* Foco sutil dentro dos limites da tela */
   :focus-visible,
   button:focus-visible,
   [tabindex]:focus-visible,
   input:focus-visible {
-    outline: 4px solid var(--color-sol-400) !important;
-    outline-offset: 3px !important;
-    box-shadow: 0 0 25px rgba(251, 191, 36, 0.75) !important;
-    transform: scale(1.04);
-    transition: transform 0.15s ease, outline 0.15s ease, box-shadow 0.15s ease;
-    z-index: 30;
+    outline: 2px solid rgba(217, 164, 38, 0.75) !important;
+    outline-offset: 1px !important;
+    box-shadow: 0 0 0 2px rgba(217, 164, 38, 0.16) !important;
+    transition: outline 0.15s ease, box-shadow 0.15s ease;
+    z-index: 20;
   }
 }
 
@@ -103,25 +102,6 @@
     scrollbar-width: none;
   }
 
-  /**
-   * Respeita barra de status, barra de gestos e recorte da camera.
-   *
-   * A medida vem do nativo pelas variaveis --inset-*, porque no Android o
-   * env(safe-area-inset-top) so cobre o recorte da camera e ignora a barra de
-   * status. O env() fica de reserva para iOS e navegador; o max() garante uma
-   * folga minima quando nenhum dos dois tem valor.
-   */
-  .area-segura-topo {
-    padding-top: max(0.75rem, var(--inset-topo, env(safe-area-inset-top, 0px)));
-  }
-  .area-segura-base {
-    padding-bottom: max(0.75rem, var(--inset-base, env(safe-area-inset-bottom, 0px)));
-  }
-  .area-segura-lados {
-    padding-left: var(--inset-esq, env(safe-area-inset-left, 0px));
-    padding-right: var(--inset-dir, env(safe-area-inset-right, 0px));
-  }
-
   /* Duas linhas e reticencias, para nome de canal comprido nao empurrar o card */
   .duas-linhas {
     display: -webkit-box;
@@ -129,6 +109,21 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+}
+
+/**
+ * Respeita barra de status, barra de gestos e recorte da camera.
+ * Definido fora de @layer utilities para nao ser sobrescrito por classes px/py do Tailwind.
+ */
+.area-segura-topo {
+  padding-top: calc(max(0px, var(--inset-topo, env(safe-area-inset-top, 0px))) + 0.75rem);
+}
+.area-segura-base {
+  padding-bottom: calc(max(0px, var(--inset-base, env(safe-area-inset-bottom, 0px))) + 0.75rem);
+}
+.area-segura-lados {
+  padding-left: max(0px, var(--inset-esq, env(safe-area-inset-left, 0px)));
+  padding-right: max(0px, var(--inset-dir, env(safe-area-inset-right, 0px)));
 }
 
 /* Quem pediu menos animacao no sistema nao deve levar susto aqui */

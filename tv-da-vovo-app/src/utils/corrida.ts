@@ -35,6 +35,33 @@ export function lembrarFonteBoa(canal: string, url: string): void {
   }
 }
 
+/** Remove a fonte lembrada quando ela falhar ao tocar, evitando prender em link morto. */
+export function esquecerFonte(canal: string, url?: string): void {
+  if (!canal) return;
+  try {
+    const memoria = lerMemoria();
+    if (!(canal in memoria)) return;
+    if (url && memoria[canal] !== url) return;
+    delete memoria[canal];
+    localStorage.setItem(CHAVE, JSON.stringify(memoria));
+  } catch {
+    /* ok */
+  }
+}
+
+/** Na troca de versao do app, limpa caches antigos de fontes e saude de sinais mortos. */
+export function limparCacheAntigoDeFontes(versao = '2'): void {
+  const chaveVersao = 'tvdavovo_cache_ver';
+  try {
+    if (localStorage.getItem(chaveVersao) === versao) return;
+    localStorage.removeItem(CHAVE);
+    localStorage.removeItem('vovo_tv_health');
+    localStorage.setItem(chaveVersao, versao);
+  } catch {
+    /* ok */
+  }
+}
+
 async function respondeComPlaylist(url: string, sinal: AbortSignal): Promise<boolean> {
   const r = await fetch(comPassePluto(url), { signal: sinal, cache: 'no-store' });
   if (!r.ok) return false;

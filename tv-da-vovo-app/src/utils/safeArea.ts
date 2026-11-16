@@ -36,6 +36,7 @@ export function observarSafeArea(): () => void {
   if (!isNative) return () => undefined;
 
   void aplicar();
+  const timer = window.setTimeout(() => void aplicar(), 250);
 
   const aoMudar = () => {
     void aplicar();
@@ -48,6 +49,7 @@ export function observarSafeArea(): () => void {
   window.addEventListener('orientationchange', aoMudar);
 
   return () => {
+    window.clearTimeout(timer);
     window.removeEventListener('vovo:insets', aoMudar);
     window.removeEventListener('resize', aoMudar);
     window.removeEventListener('orientationchange', aoMudar);

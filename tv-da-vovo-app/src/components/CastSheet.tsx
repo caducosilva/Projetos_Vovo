@@ -26,11 +26,14 @@ interface CastSheetProps {
   isOpen: boolean;
   channelName: string;
   channelUrl: string;
+  connectedTv?: TvNaRede | null;
   onClose: () => void;
   /** Chamado antes de mandar, para o celular liberar o canal e a rede. */
   onVaiParaTv?: () => void;
   /** Chamado quando a TV recusou, para o canal voltar a tocar no celular. */
   onVoltaProCelular?: () => void;
+  onTvConectada?: (tv: TvNaRede, sentUrl: string) => void;
+  onTvDesconectada?: () => void;
 }
 
 type Estado =
@@ -117,9 +120,12 @@ export const CastSheet: React.FC<CastSheetProps> = ({
   isOpen,
   channelName,
   channelUrl,
+  connectedTv = null,
   onClose,
   onVaiParaTv,
-  onVoltaProCelular
+  onVoltaProCelular,
+  onTvConectada,
+  onTvDesconectada
 }) => {
   const [estado, setEstado] = useState<Estado>({ fase: 'procurando' });
   const [passos, setPassos] = useState<PassoDoCast[]>([]);
@@ -168,10 +174,15 @@ export const CastSheet: React.FC<CastSheetProps> = ({
     }
   }, [anotar]);
 
-  // Comeca a procurar assim que abre: um passo a menos para a vovo dar
+  // Comeca a procurar ao abrir, ou mostra a TV ja espelhada se estiver conectada
   useEffect(() => {
-    if (isOpen) procurar();
-  }, [isOpen, procurar]);
+    if (!isOpen) return;
+    if (connectedTv) {
+      setEstado({ fase: 'tocando', nome: connectedTv.name, tv: connectedTv });
+      return;
+    }
+    procurar();
+  }, [isOpen, connectedTv, procurar]);
 
   const enviar = async (aparelho: TvNaRede) => {
     setEstado({ fase: 'enviando', nome: aparelho.name });
@@ -183,6 +194,7 @@ export const CastSheet: React.FC<CastSheetProps> = ({
     try {
       await mandarParaTv(aparelho, channelUrl, nomeCanal);
       setEstado({ fase: 'tocando', nome: aparelho.name, tv: aparelho });
+      onTvConectada?.(aparelho, channelUrl);
     } catch (error) {
       onVoltaProCelular?.();
       const mensagem = error instanceof Error ? error.message : 'A TV nao aceitou o canal.';
@@ -198,7 +210,8 @@ export const CastSheet: React.FC<CastSheetProps> = ({
     } catch {
       /* a TV pode ter sido desligada na mao; parar mesmo assim na tela */
     }
-    procurar();
+    onTvDesconectada?.();
+    onClose();
   };
 
   return (
@@ -238,21 +251,31 @@ export const CastSheet: React.FC<CastSheetProps> = ({
       )}
 
       {estado.fase === 'tocando' && (
-        <div className="flex flex-col items-center gap-5 py-12 text-center">
+        <div className="flex flex-col items-center gap-4 py-10 text-center">
           <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-vivo-400/15 text-vivo-400">
             <Cast className="h-11 w-11" strokeWidth={2.5} />
           </div>
           <div>
-            <p className="text-2xl font-black text-tinta-100">Tocando na {estado.nome}</p>
-            <p className="mt-1 text-base text-tinta-300">Você já pode guardar o celular.</p>
+            <p className="text-2xl font-black text-tinta-100">Espelhado na {estado.nome}</p>
+            <p className="mx-auto mt-1 max-w-sm text-base text-tinta-300">
+              Se você trocar de canal no aplicativo, a TV muda para o mesmo canal na hora.
+            </p>
           </div>
-          <button
-            onClick={() => parar(estado.tv)}
-            className="flex h-toque items-center gap-2 rounded-2xl bg-morto-400 px-6 text-xl font-black text-noite-900 transition active:scale-95"
-          >
-            <Square className="h-6 w-6 fill-current" />
-            Parar na TV
-          </button>
+          <div className="flex w-full max-w-sm flex-col gap-2.5 pt-2">
+            <button
+              onClick={onClose}
+              className="flex h-toque items-center justify-center gap-2 rounded-2xl bg-sol-400 px-6 text-lg font-black text-noite-900 transition active:scale-95"
+            >
+              Continuar no app (trocar de canal)
+            </button>
+            <button
+              onClick={() => parar(estado.tv)}
+              className="flex h-toque items-center justify-center gap-2 rounded-2xl bg-morto-400 px-6 text-xl font-black text-noite-900 transition active:scale-95"
+            >
+              <Square className="h-6 w-6 fill-current" />
+              Desconectar da TV
+            </button>
+          </div>
         </div>
       )}
 

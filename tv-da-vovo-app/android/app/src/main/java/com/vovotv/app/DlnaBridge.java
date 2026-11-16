@@ -248,7 +248,7 @@ public class DlnaBridge extends Plugin {
         if (target == null) return;
 
         final String url = call.getString("url");
-        final String title = call.getString("title", "Vovo TV");
+        final String title = call.getString("title", "CLARICE TV");
         if (TextUtils.isEmpty(url)) {
             call.reject("url vazia");
             return;

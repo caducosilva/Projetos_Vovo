@@ -34,7 +34,7 @@ import java.io.File;
 public class UpdateBridge extends Plugin {
 
     private static final String TAG = "UpdateBridge";
-    private static final String APK_NAME = "VovoTV-atualizacao.apk";
+    private static final String APK_NAME = "ClariceTV-atualizacao.apk";
 
     /** Versao instalada agora, para comparar com a publicada. */
     @PluginMethod
@@ -122,7 +122,7 @@ public class UpdateBridge extends Plugin {
         final long downloadId;
         try {
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            request.setTitle("Vovo TV");
+            request.setTitle("CLARICE TV");
             request.setDescription("Baixando a atualizacao");
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
             request.setDestinationUri(Uri.fromFile(target));

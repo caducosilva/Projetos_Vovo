@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.tvdavovo.app',
-  appName: 'TV da Vovó',
+  appName: 'CLARICE TV',
   webDir: 'dist',
   server: {
     // http em vez de https: a maioria dos streams de IPTV e http puro.

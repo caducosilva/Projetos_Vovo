@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Download, ShieldCheck, AlertTriangle, Loader2 } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Download, AlertTriangle, Loader2, RotateCcw } from 'lucide-react';
 import {
   canInstallApks,
   downloadAndInstall,
@@ -12,27 +13,32 @@ import { Sheet } from './Sheet';
 interface UpdatePromptProps {
   update: AvailableUpdate | null;
   onDismiss: () => void;
+  /** Quando true, ja inicia download e instalacao assim que detectar versao nova. */
+  autoStart?: boolean;
 }
 
 type Fase =
-  | { nome: 'perguntando' }
+  | { nome: 'verificando' }
   | { nome: 'permissao' }
   | { nome: 'baixando'; percentual: number }
+  | { nome: 'instalando' }
   | { nome: 'erro'; mensagem: string };
 
 /**
- * Aviso de versao nova.
+ * Atualizacao automatica sem exigir passos dificeis.
  *
- * Baixa e instala sem sair do app porque ele nao vive na Play Store, e o
- * caminho normal (abrir navegador, achar a pasta de downloads, tocar no
- * arquivo, liberar origem desconhecida) tem passos demais para a vovo.
+ * Assim que uma versao nova e encontrada ao abrir o app, ja baixa e entrega
+ * para o instalador do Android automaticamente se a permissao estiver liberada.
  */
-export const UpdatePrompt: React.FC<UpdatePromptProps> = ({ update, onDismiss }) => {
-  const [fase, setFase] = useState<Fase>({ nome: 'perguntando' });
+export const UpdatePrompt: React.FC<UpdatePromptProps> = ({
+  update,
+  onDismiss,
+  autoStart = true
+}) => {
+  const [fase, setFase] = useState<Fase>({ nome: 'verificando' });
+  const iniciouRef = useRef<number | null>(null);
 
-  if (!update) return null;
-
-  const atualizar = async () => {
+  const atualizar = useCallback(async (alvo: AvailableUpdate) => {
     if (!(await canInstallApks())) {
       setFase({ nome: 'permissao' });
       return;
@@ -40,58 +46,101 @@ export const UpdatePrompt: React.FC<UpdatePromptProps> = ({ update, onDismiss })
 
     setFase({ nome: 'baixando', percentual: 0 });
     try {
-      await downloadAndInstall(update.apkUrl, (percentual) => {
+      await downloadAndInstall(alvo.apkUrl, (percentual) => {
         setFase({ nome: 'baixando', percentual });
       });
-      // O instalador do Android assume daqui; o app fica parado atras dele.
+      setFase({ nome: 'instalando' });
     } catch (error) {
       setFase({
         nome: 'erro',
-        mensagem: error instanceof Error ? error.message : 'Nao consegui baixar a atualizacao.'
+        mensagem: error instanceof Error ? error.message : 'Não consegui baixar a atualização.'
       });
     }
-  };
+  }, []);
+
+  // Inicia download/instalacao automaticamente assim que recebe update novo
+  useEffect(() => {
+    if (!update) {
+      iniciouRef.current = null;
+      return;
+    }
+    if (!autoStart || iniciouRef.current === update.versionCode) return;
+    iniciouRef.current = update.versionCode;
+    void atualizar(update);
+  }, [update, autoStart, atualizar]);
+
+  // Se estava aguardando permissao de instalar APKs, retoma automatico ao voltar das Configuracoes
+  useEffect(() => {
+    if (!update || fase.nome !== 'permissao') return;
+    let ativo = true;
+    const tentarDeNovo = async () => {
+      if (!ativo) return;
+      if (await canInstallApks()) {
+        void atualizar(update);
+      }
+    };
+
+    window.addEventListener('focus', tentarDeNovo);
+    let remover: (() => void) | null = null;
+    CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) void tentarDeNovo();
+    })
+      .then((h) => {
+        if (!ativo) h.remove();
+        else remover = () => h.remove();
+      })
+      .catch(() => undefined);
+
+    return () => {
+      ativo = false;
+      window.removeEventListener('focus', tentarDeNovo);
+      if (remover) remover();
+    };
+  }, [update, fase.nome, atualizar]);
+
+  if (!update) return null;
 
   const agoraNao = () => {
     skipVersion(update.versionCode);
     onDismiss();
   };
 
-  const baixando = fase.nome === 'baixando';
+  const baixando = fase.nome === 'baixando' || fase.nome === 'verificando';
 
   return (
     <Sheet
       isOpen
-      title="Tem uma versão nova"
-      subtitle={`TV da Vovó ${update.versionName}`}
+      title="Atualizando a CLARICE TV"
+      subtitle={`Versão ${update.versionName}`}
       onClose={baixando ? () => undefined : agoraNao}
       footer={
-        fase.nome === 'perguntando' || fase.nome === 'erro' ? (
+        fase.nome === 'erro' || fase.nome === 'instalando' ? (
           <div className="flex flex-col gap-2.5 pb-2">
             <button
-              onClick={atualizar}
+              onClick={() => void atualizar(update)}
               className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-sol-400 text-xl font-black text-noite-900 transition active:scale-95"
             >
-              <Download className="h-7 w-7" strokeWidth={2.5} />
-              Atualizar agora
+              {fase.nome === 'instalando' ? (
+                <RotateCcw className="h-7 w-7" strokeWidth={2.5} />
+              ) : (
+                <Download className="h-7 w-7" strokeWidth={2.5} />
+              )}
+              {fase.nome === 'instalando' ? 'Abrir instalador de novo' : 'Tentar atualizar de novo'}
             </button>
             <button
               onClick={agoraNao}
               className="flex h-toque w-full items-center justify-center rounded-2xl border-2 border-noite-500 bg-noite-700 text-lg font-black text-tinta-300 transition active:scale-95"
             >
-              Agora não
+              Continuar assistindo agora
             </button>
           </div>
         ) : undefined
       }
     >
-      {fase.nome === 'perguntando' && (
-        <div className="flex flex-col items-center gap-5 py-6 text-center">
-          <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-sol-400/15 text-sol-400">
-            <ShieldCheck className="h-11 w-11" strokeWidth={2.5} />
-          </div>
-          <p className="max-w-md text-lg leading-relaxed font-bold text-tinta-100">{update.notes}</p>
-          <p className="text-base text-tinta-300">O app baixa e instala sozinho. É seguro.</p>
+      {fase.nome === 'verificando' && (
+        <div className="flex flex-col items-center gap-5 py-10 text-center">
+          <Loader2 className="h-14 w-14 animate-spin text-sol-400" strokeWidth={2.5} />
+          <p className="text-2xl font-black text-tinta-100">Preparando atualização...</p>
         </div>
       )}
 
@@ -101,31 +150,33 @@ export const UpdatePrompt: React.FC<UpdatePromptProps> = ({ update, onDismiss })
             <AlertTriangle className="h-11 w-11" strokeWidth={2.5} />
           </div>
           <p className="max-w-md text-lg leading-snug font-bold text-tinta-100">
-            O Android precisa da sua permissão para instalar a atualização.
+            Libere uma única vez para a CLARICE TV atualizar sozinha quando você abrir o app.
           </p>
           <p className="max-w-md text-base leading-snug text-tinta-300">
-            Toque no botão abaixo e ligue a chave que aparecer. Depois volte aqui e toque em
-            Atualizar agora.
+            Toque abaixo, ligue a chave de permissão e aperte Voltar.
           </p>
           <button
-            onClick={openInstallPermission}
+            onClick={() => void openInstallPermission()}
             className="flex h-toque items-center gap-2 rounded-2xl bg-sol-400 px-6 text-xl font-black text-noite-900 transition active:scale-95"
           >
-            Abrir a permissão
+            Liberar atualização automática
           </button>
           <button
-            onClick={() => setFase({ nome: 'perguntando' })}
+            onClick={() => void atualizar(update)}
             className="text-lg font-black text-tinta-300 underline"
           >
-            Já liberei, voltar
+            Já liberei, continuar agora
+          </button>
+          <button onClick={agoraNao} className="text-base font-bold text-tinta-500">
+            Agora não
           </button>
         </div>
       )}
 
-      {baixando && (
+      {fase.nome === 'baixando' && (
         <div className="flex flex-col items-center gap-5 py-10 text-center">
           <Loader2 className="h-14 w-14 animate-spin text-sol-400" strokeWidth={2.5} />
-          <p className="text-2xl font-black text-tinta-100">Baixando... {fase.percentual}%</p>
+          <p className="text-2xl font-black text-tinta-100">Baixando atualização... {fase.percentual}%</p>
 
           <div
             className="h-4 w-full max-w-sm overflow-hidden rounded-full bg-noite-700"
@@ -140,7 +191,19 @@ export const UpdatePrompt: React.FC<UpdatePromptProps> = ({ update, onDismiss })
             />
           </div>
 
-          <p className="text-base text-tinta-300">Não feche o app.</p>
+          <p className="max-w-md text-base text-tinta-300">{update.notes}</p>
+        </div>
+      )}
+
+      {fase.nome === 'instalando' && (
+        <div className="flex flex-col items-center gap-4 py-8 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-sol-400/15 text-sol-400">
+            <Download className="h-11 w-11" strokeWidth={2.5} />
+          </div>
+          <p className="text-2xl font-black text-tinta-100">Quase pronto!</p>
+          <p className="max-w-md text-lg font-bold text-tinta-300">
+            Toque em Atualizar ou Instalar na janela do celular. Depois o aplicativo reabre sozinho.
+          </p>
         </div>
       )}
 

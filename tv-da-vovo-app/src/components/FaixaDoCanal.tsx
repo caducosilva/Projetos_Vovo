@@ -1,5 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { programacaoDoCanal, horaCurta, type AgoraEDepois } from '../utils/programacao';
+import {
+  programacaoDoCanal,
+  horaCurta,
+  horarioDoPrograma,
+  progressoDoPrograma,
+  type AgoraEDepois
+} from '../utils/programacao';
 
 interface FaixaDoCanalProps {
   numero?: number;
@@ -15,7 +21,7 @@ interface FaixaDoCanalProps {
 }
 
 /** Quanto tempo a faixa fica na tela. Depois disso some e fica so a imagem. */
-const SEGUNDOS_NA_TELA = 3;
+const SEGUNDOS_NA_TELA = 5;
 
 /**
  * Faixa de identificacao do canal, como na TV por assinatura: aparece ao
@@ -69,6 +75,7 @@ export const FaixaDoCanal: React.FC<FaixaDoCanalProps> = ({
 
   const agora = guia.agora;
   const depois = guia.depois;
+  const progresso = agora ? progressoDoPrograma(agora) : null;
 
   return (
     <div
@@ -82,7 +89,7 @@ export const FaixaDoCanal: React.FC<FaixaDoCanalProps> = ({
       }}
       aria-hidden={!visivel}
     >
-      <div className="mx-auto flex w-full max-w-[64rem] items-center gap-4 overflow-hidden rounded-2xl border border-white/10 bg-black/80 px-5 py-3 shadow-2xl backdrop-blur-md">
+      <div className="mx-auto flex w-full max-w-[64rem] items-center gap-4 overflow-hidden rounded-2xl border border-white/15 bg-black/85 px-5 py-3 shadow-2xl backdrop-blur-md">
         {typeof numero === 'number' && (
           <div className="flex h-14 w-16 shrink-0 items-center justify-center rounded-xl bg-sol-400 text-2xl font-black leading-none text-noite-900">
             {numero}
@@ -102,16 +109,28 @@ export const FaixaDoCanal: React.FC<FaixaDoCanalProps> = ({
         <div className="min-w-0 flex-1">
           <p className="truncate text-2xl font-black leading-tight text-white">{nome}</p>
           {agora ? (
-            <p className="truncate text-xl font-bold leading-tight text-sol-400">
-              Agora: {agora.titulo}
-              {agora.fim ? <span className="font-semibold text-tinta-300"> · até {horaCurta(agora.fim)}</span> : null}
-            </p>
+            <>
+              <p className="truncate text-lg font-bold leading-snug text-sol-400 sm:text-xl">
+                Agora: {agora.titulo}
+              </p>
+              <p className="truncate text-sm font-bold leading-snug text-tinta-100 sm:text-base">
+                {horarioDoPrograma(agora)}
+              </p>
+              {progresso !== null && (
+                <div className="mt-1.5 h-1.5 w-full max-w-md overflow-hidden rounded-full bg-white/15">
+                  <div
+                    className="h-full rounded-full bg-sol-400 transition-all duration-300"
+                    style={{ width: `${progresso}%` }}
+                  />
+                </div>
+              )}
+            </>
           ) : (
             categoria && <p className="truncate text-lg font-bold leading-tight text-tinta-300">{categoria}</p>
           )}
           {agora && depois && (
-            <p className="truncate text-base font-semibold leading-tight text-tinta-300">
-              Depois: {depois.titulo}
+            <p className="mt-0.5 truncate text-sm font-semibold leading-tight text-tinta-300 sm:text-base">
+              Depois ({horaCurta(depois.inicio)}): {depois.titulo}
             </p>
           )}
         </div>

@@ -32,11 +32,11 @@ export const ChannelCard: React.FC<ChannelCardProps> = React.memo(
         onClick={() => onSelect(channel)}
         tabIndex={0}
         data-channel-card="true"
-        className={`relative flex w-full flex-col gap-2.5 rounded-3xl p-3 text-left transition-all duration-150 ${
+        className={`relative flex w-full flex-col gap-2.5 overflow-hidden rounded-3xl p-3 text-left transition-colors duration-150 ${
           isFocused
-            ? 'scale-[1.06] border-4 border-sol-400 bg-noite-600 shadow-[0_0_35px_rgba(251,191,36,0.9)] z-20'
-            : 'border-2 border-noite-600 bg-noite-700 hover:border-noite-500'
-        } focus-visible:border-sol-400 focus-visible:scale-[1.06] active:scale-95`}
+            ? 'border-2 border-sol-400/75 bg-noite-600 ring-1 ring-sol-400/25'
+            : 'border border-noite-600 bg-noite-700 hover:border-noite-500/80 hover:bg-noite-600/60'
+        } focus-visible:border-sol-400/70 active:scale-[0.98]`}
         aria-label={`Canal ${numero}: Assistir ${nome}`}
       >
         {/* Numero do canal: pra vovo dizer "o 12 nao funciona" em vez do nome */}

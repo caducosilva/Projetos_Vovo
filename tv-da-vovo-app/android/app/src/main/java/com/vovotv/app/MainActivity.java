@@ -3,6 +3,7 @@ package com.vovotv.app;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.View;
+import android.view.WindowManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
@@ -26,6 +27,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(CastBridge.class);
         registerPlugin(UpdateBridge.class);
         super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         try {
             WebView webView = getBridge().getWebView();
@@ -54,6 +56,12 @@ public class MainActivity extends BridgeActivity {
         } catch (RuntimeException e) {
             e.printStackTrace();
         }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     @Override

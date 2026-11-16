@@ -11,21 +11,30 @@ import {
   Tv,
   Radio,
   ChevronLeft,
+  ChevronRight,
   RotateCcw,
   List,
   X,
   Search,
   Cast,
+  Square,
   Loader2
 } from 'lucide-react';
 import type { Channel, ChannelWithHealth } from '../types';
 import { tv } from '../utils/tvBridge';
-import { podeMandarParaTv } from '../utils/tvsDaCasa';
+import { podeMandarParaTv, mandarParaTv, type TvNaRede } from '../utils/tvsDaCasa';
 import { ehCanalDeCamera } from '../utils/cameras';
 import { fontesDoCanal } from '../utils/fontes';
-import { ordenarFontes, lembrarFonteBoa } from '../utils/corrida';
+import { ordenarFontes, lembrarFonteBoa, esquecerFonte } from '../utils/corrida';
 import { FaixaDoCanal } from './FaixaDoCanal';
-import { programacaoDoCanal, comPassePluto, type AgoraEDepois } from '../utils/programacao';
+import {
+  programacaoDoCanal,
+  comPassePluto,
+  horarioDoPrograma,
+  progressoDoPrograma,
+  horaCurta,
+  type AgoraEDepois
+} from '../utils/programacao';
 
 /** Programa no ar do canal em foco no guia. Busca so de quem esta em foco. */
 const ProgramaAgora: React.FC<{ epg?: string }> = ({ epg }) => {
@@ -41,7 +50,11 @@ const ProgramaAgora: React.FC<{ epg?: string }> = ({ epg }) => {
     };
   }, [epg]);
   if (!guia.agora) return null;
-  return <span className="block truncate text-base font-bold text-sol-400">Agora: {guia.agora.titulo}</span>;
+  return (
+    <span className="block truncate text-sm font-bold text-sol-400">
+      Agora: {guia.agora.titulo} · {horarioDoPrograma(guia.agora)}
+    </span>
+  );
 };
 import { cleanChannelName, isRadioChannel } from '../utils/channelName';
 import { CastSheet } from './CastSheet';
@@ -62,6 +75,10 @@ interface VideoPlayerProps {
   onChannelExhausted?: () => void;
   /** Numero do primeiro canal da lista (1 na TV Aberta, 101 no Cine Zap). */
   primeiroNumero?: number;
+  /** TV atualmente espelhada na mesma rede Wi-Fi (mantida entre trocas de canal). */
+  tvConectada?: TvNaRede | null;
+  onTvConectada?: (tv: TvNaRede, nomeCanal: string) => void;
+  onDesconectarTv?: () => Promise<void> | void;
 }
 
 /** Janela para o segundo Voltar contar como "quero sair". */
@@ -87,7 +104,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onPlaybackOk,
   onPlaybackFail,
   onChannelExhausted,
-  primeiroNumero = 1
+  primeiroNumero = 1,
+  tvConectada = null,
+  onTvConectada,
+  onDesconectarTv
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -112,7 +132,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const [brilho, setBrilho] = useState(() => {
     const salvo = localStorage.getItem('vovo_tv_brightness');
-    return salvo !== null ? parseFloat(salvo) : 1.0;
+    return salvo !== null ? parseFloat(salvo) : 0.75;
   });
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -167,6 +187,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [gavetaAberta, setGavetaAberta] = useState(false);
   const [buscaGaveta, setBuscaGaveta] = useState('');
   const [castAberto, setCastAberto] = useState(false);
+
+  const ultimaEnviadaRef = useRef<{ tvId: string; url: string } | null>(null);
+  const [enviandoParaTv, setEnviandoParaTv] = useState(false);
+  const [erroNaTv, setErroNaTv] = useState<string | null>(null);
+  const [guiaNoAr, setGuiaNoAr] = useState<AgoraEDepois>({});
 
   const [hud, setHud] = useState<Hud>(null);
   const hudTimerRef = useRef<number | null>(null);
@@ -244,7 +269,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     tv.keepAwake(true);
     return () => {
-      tv.keepAwake(false);
       tv.resetBrightness();
       tv.setImmersive(false);
     };
@@ -339,10 +363,103 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, []);
 
+  /** Programacao atual do canal (inicio e fim), atualizada na abertura e a cada 30s. */
+  useEffect(() => {
+    let vivo = true;
+    setGuiaNoAr({});
+    const atualizar = () => {
+      programacaoDoCanal(channel?.epg).then((r) => {
+        if (vivo) setGuiaNoAr(r);
+      });
+    };
+    atualizar();
+    const timer = window.setInterval(atualizar, 30_000);
+    return () => {
+      vivo = false;
+      window.clearInterval(timer);
+    };
+  }, [channel?.epg, reacender]);
+
+  /**
+   * Espelhamento continuo: quando ja existe uma TV conectada no Wi-Fi, qualquer
+   * troca de canal no app envia o canal escolhido diretamente para essa TV.
+   */
+  useEffect(() => {
+    if (!tvConectada) {
+      ultimaEnviadaRef.current = null;
+      setEnviandoParaTv(false);
+      setErroNaTv(null);
+      return;
+    }
+    if (!channel || !endereco) return;
+
+    const urlEnvio = comPassePluto(endereco);
+    if (
+      ultimaEnviadaRef.current?.tvId === tvConectada.id &&
+      ultimaEnviadaRef.current?.url === urlEnvio
+    ) {
+      return;
+    }
+
+    let cancelado = false;
+    setEnviandoParaTv(true);
+    setErroNaTv(null);
+
+    mandarParaTv(tvConectada, urlEnvio, nomeCanal)
+      .then(() => {
+        if (cancelado) return;
+        ultimaEnviadaRef.current = { tvId: tvConectada.id, url: urlEnvio };
+        setEnviandoParaTv(false);
+        setErroNaTv(null);
+        lembrarFonteBoa(channel.id || channel.name, endereco);
+        onPlaybackOk?.(endereco);
+        onTvConectada?.(tvConectada, nomeCanal);
+      })
+      .catch((e) => {
+        if (cancelado) return;
+        esquecerFonte(channel.id || channel.name, endereco);
+        onPlaybackFail?.(endereco, e instanceof Error ? e.message : 'erro ao espelhar na TV');
+        if (temReserva) {
+          setIndiceFonte((i) => i + 1);
+          return;
+        }
+        setEnviandoParaTv(false);
+        setErroNaTv(e instanceof Error ? e.message : 'A TV não aceitou este canal.');
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [
+    tvConectada,
+    channel,
+    endereco,
+    nomeCanal,
+    tentativa,
+    temReserva,
+    onPlaybackOk,
+    onPlaybackFail,
+    onTvConectada
+  ]);
+
   /** Carrega o canal. Refaz do zero quando o canal muda ou ao tentar de novo. */
   useEffect(() => {
     const video = videoRef.current;
     if (!channel || !video) return;
+
+    if (tvConectada) {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      setCarregando(false);
+      setErro(null);
+      setTocando(false);
+      return;
+    }
 
     setCarregando(true);
     // ainda escolhendo a fonte mais rapida: so mostra "ligando o canal"
@@ -390,6 +507,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       console.warn('[player] FALHOU', JSON.stringify({ canal: channel.name, detalhe, temReserva }));
       window.clearTimeout(relogio);
       // marca ESTA fonte como ruim (a saude e por URL), nao o canal inteiro
+      esquecerFonte(channel.id || channel.name, endereco);
       onPlaybackFail?.(endereco, detalhe);
 
       if (temReserva) {
@@ -530,7 +648,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // Depende do ENDERECO, nao do objeto `channel`: quem monta o canal pode
     // recriar o objeto a cada render sem querer, e ai o player se remontava
     // no meio da exibicao. Endereco igual = nada para refazer.
-  }, [endereco, temReserva, tentativa, onPlaybackOk, onPlaybackFail, onChannelExhausted]);
+  }, [endereco, temReserva, tentativa, tvConectada, onPlaybackOk, onPlaybackFail, onChannelExhausted]);
   // indiceFonte fica de fora de proposito: ele so muda junto com o endereco
 
   /**
@@ -942,6 +1060,124 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* Modo espelhado na TV: controle remoto simples para trocar de canal ou desconectar */}
+      {!isTv && tvConectada && (
+        <div
+          className="area-segura-topo area-segura-base absolute inset-0 z-30 flex flex-col items-center justify-center gap-5 bg-noite-900 px-5 text-center"
+          {...pararPropagacao}
+        >
+          <div className="inline-flex items-center gap-2 rounded-full border-2 border-vivo-400/50 bg-vivo-400/15 px-4 py-1.5 text-sm font-black text-vivo-400 sm:text-base">
+            <Cast className="h-5 w-5" strokeWidth={2.5} />
+            ESPELHADO NA {tvConectada.name.toUpperCase()}
+          </div>
+
+          <div className="flex flex-col items-center gap-3">
+            {channel.logo && (
+              <img
+                src={channel.logo}
+                alt=""
+                className="h-20 w-20 rounded-2xl bg-white/10 object-contain p-2"
+              />
+            )}
+            <div className="flex items-center gap-2.5">
+              {typeof numero === 'number' && (
+                <span className="rounded-xl bg-sol-400 px-3 py-1 text-xl font-black text-noite-900">
+                  {numero}
+                </span>
+              )}
+              <h2 className="text-3xl font-black text-tinta-100 sm:text-4xl">{nomeCanal}</h2>
+            </div>
+          </div>
+
+          {guiaNoAr.agora && (
+            <div className="w-full max-w-md rounded-2xl border-2 border-noite-600 bg-noite-800 p-4 text-left">
+              <p className="text-xs font-black tracking-wide text-tinta-500 uppercase">Passando agora</p>
+              <p className="mt-0.5 text-xl font-black text-sol-400">{guiaNoAr.agora.titulo}</p>
+              <p className="mt-1 text-base font-bold text-tinta-100">
+                {horarioDoPrograma(guiaNoAr.agora)}
+              </p>
+              {(() => {
+                const pct = progressoDoPrograma(guiaNoAr.agora);
+                if (pct === null) return null;
+                return (
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-noite-900">
+                    <div className="h-full rounded-full bg-sol-400" style={{ width: `${pct}%` }} />
+                  </div>
+                );
+              })()}
+              {guiaNoAr.depois && (
+                <p className="mt-2 truncate text-sm font-semibold text-tinta-300">
+                  Depois ({horaCurta(guiaNoAr.depois.inicio)}): {guiaNoAr.depois.titulo}
+                </p>
+              )}
+            </div>
+          )}
+
+          {enviandoParaTv && (
+            <div className="flex items-center gap-2.5 rounded-2xl bg-noite-800 px-5 py-3 text-lg font-bold text-sol-400">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              Mandando {nomeCanal} para a TV...
+            </div>
+          )}
+
+          {erroNaTv && !enviandoParaTv && (
+            <div className="flex max-w-md flex-col items-center gap-2 rounded-2xl border-2 border-morto-400/50 bg-morto-400/10 p-4">
+              <p className="text-base font-bold text-morto-400">{erroNaTv}</p>
+              <button
+                onClick={() => {
+                  ultimaEnviadaRef.current = null;
+                  setTentativa((t) => t + 1);
+                }}
+                className="flex h-12 items-center gap-2 rounded-xl bg-sol-400 px-5 text-base font-black text-noite-900 transition active:scale-95"
+              >
+                <RotateCcw className="h-5 w-5" strokeWidth={2.5} />
+                Tentar mandar de novo
+              </button>
+            </div>
+          )}
+
+          <div className="flex w-full max-w-md flex-wrap items-center justify-center gap-2.5">
+            {onPrevChannel && (
+              <button
+                onClick={onPrevChannel}
+                className="flex h-16 min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl border-2 border-noite-500 bg-noite-800 px-4 text-base font-black text-tinta-100 transition active:scale-95"
+              >
+                <ChevronLeft className="h-6 w-6 text-sol-400" strokeWidth={3} />
+                Anterior
+              </button>
+            )}
+            {channelList.length > 0 && (
+              <button
+                onClick={() => setGavetaAberta(true)}
+                className="flex h-16 min-w-[8.5rem] flex-1 items-center justify-center gap-2 rounded-2xl border-2 border-noite-500 bg-noite-800 px-4 text-base font-black text-tinta-100 transition active:scale-95"
+              >
+                <List className="h-6 w-6 text-sol-400" strokeWidth={2.5} />
+                Canais
+              </button>
+            )}
+            {onNextChannel && (
+              <button
+                onClick={onNextChannel}
+                className="flex h-16 min-w-[8.5rem] flex-1 items-center justify-center gap-1.5 rounded-2xl border-2 border-noite-500 bg-noite-800 px-4 text-base font-black text-tinta-100 transition active:scale-95"
+              >
+                Próximo
+                <ChevronRight className="h-6 w-6 text-sol-400" strokeWidth={3} />
+              </button>
+            )}
+          </div>
+
+          {onDesconectarTv && (
+            <button
+              onClick={() => void onDesconectarTv()}
+              className="flex h-16 w-full max-w-md items-center justify-center gap-2 rounded-2xl bg-morto-400 px-6 text-xl font-black text-noite-900 transition active:scale-95"
+            >
+              <Square className="h-6 w-6 fill-current" />
+              Desconectar da TV
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Numero + nome do canal so enquanto liga ou quando deu erro, para a
           vovo saber qual canal tentou abrir. Assistindo, quem mostra o nome e
           a faixa de baixo, que some sozinha em 3 segundos. */}
@@ -1066,11 +1302,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               e.stopPropagation();
               setCastAberto(true);
             }}
-            className="flex h-toque shrink-0 items-center gap-2 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-4 text-white transition active:scale-95"
-            aria-label="Mandar este canal para a TV"
+            className={`flex h-toque shrink-0 items-center gap-2 rounded-2xl border-2 px-4 transition active:scale-95 ${
+              tvConectada
+                ? 'border-vivo-400 bg-vivo-400/20 text-vivo-400'
+                : 'border-noite-500 bg-noite-900/90 text-white'
+            }`}
+            aria-label={tvConectada ? 'Opções da TV conectada' : 'Mandar este canal para a TV'}
           >
-            <Cast className="h-7 w-7 text-sol-400" strokeWidth={2.5} />
-            <span className="hidden text-lg font-black sm:inline">TV</span>
+            <Cast className={`h-7 w-7 ${tvConectada ? 'text-vivo-400' : 'text-sol-400'}`} strokeWidth={2.5} />
+            <span className="hidden text-lg font-black sm:inline">
+              {tvConectada ? 'Na TV' : 'TV'}
+            </span>
+          </button>
+        )}
+
+        {!isTv && tvConectada && onDesconectarTv && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              void onDesconectarTv();
+            }}
+            className="flex h-toque shrink-0 items-center gap-1.5 rounded-2xl bg-morto-400 px-3.5 text-noite-900 transition active:scale-95"
+            aria-label="Desconectar da TV"
+          >
+            <Square className="h-5 w-5 fill-current" />
+            <span className="text-base font-black">Desconectar</span>
           </button>
         )}
 
@@ -1094,11 +1350,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       </div>
 
-      {/* Barra de baixo */}
+      {/* Barra de baixo (so para assistindo no celular; espelhado usa o controle dedicado acima) */}
+      {!tvConectada && (
       <div
         className={`area-segura-base absolute right-0 bottom-0 left-0 z-50 bg-gradient-to-t from-black/95 to-transparent px-3 pt-10 transition-opacity duration-300 ${controlesVisiveis}`}
         {...pararPropagacao}
       >
+        {!isTv && !radio && guiaNoAr.agora && (
+          <div className="mx-auto mb-3 max-w-md rounded-2xl border border-white/15 bg-noite-900/90 px-4 py-2 text-center">
+            <p className="truncate text-base font-black text-sol-400">
+              Agora: {guiaNoAr.agora.titulo}
+            </p>
+            <p className="text-sm font-bold text-tinta-100">
+              {horarioDoPrograma(guiaNoAr.agora)}
+            </p>
+          </div>
+        )}
         {!isTv && !radio && !deitado && (
           <p className="mb-3 text-center text-base font-bold text-tinta-300">
             Deite o celular para ver em tela cheia
@@ -1166,6 +1433,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           )}
         </div>
       </div>
+      )}
 
       {/* Gaveta de canais */}
       {gavetaAberta && (
@@ -1250,7 +1518,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {!radio && (
+      {!radio && !tvConectada && (
         <FaixaDoCanal
           numero={numero}
           nome={nomeCanal}
@@ -1265,10 +1533,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       <CastSheet
         isOpen={castAberto}
         channelName={channel.name}
-        channelUrl={channel.url}
+        channelUrl={comPassePluto(endereco || channel.url)}
+        connectedTv={tvConectada}
         onClose={() => setCastAberto(false)}
         onVaiParaTv={pausarPorCausaDaTv}
         onVoltaProCelular={voltarATocarNoCelular}
+        onTvConectada={(tvEscolhida, sentUrl) => {
+          ultimaEnviadaRef.current = { tvId: tvEscolhida.id, url: sentUrl };
+          onTvConectada?.(tvEscolhida, nomeCanal);
+        }}
+        onTvDesconectada={() => {
+          ultimaEnviadaRef.current = null;
+          void onDesconectarTv?.();
+        }}
       />
     </div>
   );

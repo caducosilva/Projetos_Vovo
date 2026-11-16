@@ -1,4 +1,4 @@
-import { registerPlugin } from '@capacitor/core';
+import { CapacitorHttp, registerPlugin } from '@capacitor/core';
 import { isNative } from './tvBridge';
 
 /**
@@ -10,7 +10,7 @@ const MANIFEST_URL =
 
 const SKIP_KEY = 'vovo_tv_versao_dispensada';
 const LAST_CHECK_KEY = 'vovo_tv_ultima_checagem';
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const CHECK_INTERVAL_MS = 0;
 
 interface UpdateBridgePlugin {
   getInfo(): Promise<{ versionCode: number; versionName: string; packageName: string }>;
@@ -90,10 +90,21 @@ export async function checkForUpdate(force = false): Promise<AvailableUpdate | n
   localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
 
   let manifest: unknown;
+  const url = `${MANIFEST_URL}?t=${Date.now()}`;
   try {
-    const response = await fetch(`${MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
-    if (!response.ok) return null;
-    manifest = await response.json();
+    if (isNative) {
+      const res = await CapacitorHttp.get({
+        url,
+        connectTimeout: 5000,
+        readTimeout: 5000
+      });
+      if (res.status < 200 || res.status >= 300) return null;
+      manifest = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+    } else {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) return null;
+      manifest = await response.json();
+    }
   } catch {
     return null;
   }
