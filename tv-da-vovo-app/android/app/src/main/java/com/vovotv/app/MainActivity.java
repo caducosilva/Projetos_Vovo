@@ -1,12 +1,19 @@
 package com.vovotv.app;
 
+import android.app.PictureInPictureParams;
+import android.app.UiModeManager;
+import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Rational;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
+import androidx.annotation.NonNull;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -19,6 +26,7 @@ public class MainActivity extends BridgeActivity {
 
     /** Fundo do app, o mesmo --color-noite-900 do CSS. */
     private static final int FUNDO = Color.parseColor("#080B11");
+    private volatile boolean pipPermitido = false;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -65,10 +73,92 @@ public class MainActivity extends BridgeActivity {
         getWindow().setAttributes(params);
     }
 
+    private boolean ehTv() {
+        UiModeManager ui = (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
+        return ui != null && ui.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION;
+    }
+
+    private PictureInPictureParams criarParamsPip(boolean autoEnter) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null;
+        PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
+            .setAspectRatio(new Rational(16, 9));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(autoEnter && !ehTv());
+            builder.setSeamlessResizeEnabled(true);
+        }
+        return builder.build();
+    }
+
+    public void setPipPermitido(boolean permitido) {
+        this.pipPermitido = permitido && !ehTv();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !ehTv()) {
+            try {
+                PictureInPictureParams params = criarParamsPip(this.pipPermitido);
+                if (params != null) setPictureInPictureParams(params);
+            } catch (Exception ignored) {
+                // aparelho nao suporta PiP
+            }
+        }
+    }
+
+    public boolean entrarEmPip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || ehTv()) return false;
+        try {
+            PictureInPictureParams params = criarParamsPip(this.pipPermitido);
+            return params != null && enterPictureInPictureMode(params);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @Override
+    public void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (pipPermitido && !ehTv() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!isInPictureInPictureMode()) {
+                entrarEmPip();
+            }
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        // Em PiP o Android dispara onPause; mantem o WebView e timers vivos para o video nao congelar.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode()) {
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView != null) {
+                webView.onResume();
+                webView.resumeTimers();
+            }
+        }
+    }
+
     @Override
     public void onResume() {
         super.onResume();
         aplicarTelaAcesaEBrilhoMaximo();
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView != null) {
+            webView.onResume();
+            webView.resumeTimers();
+            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:resume'))", null);
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, @NonNull Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView != null) {
+            webView.onResume();
+            webView.resumeTimers();
+            webView.evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('vovo:pip', { detail: { active: "
+                    + isInPictureInPictureMode + " } }))",
+                null
+            );
+        }
     }
 
     @Override

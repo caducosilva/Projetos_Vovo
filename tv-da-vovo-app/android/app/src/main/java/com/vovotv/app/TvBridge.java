@@ -274,6 +274,35 @@ public class TvBridge extends Plugin {
         call.resolve(ret);
     }
 
+    /** Permite ou bloqueia entrada automatica em PiP ao sair do app durante o video. */
+    @PluginMethod
+    public void setPipAllowed(PluginCall call) {
+        final boolean allowed = call.getBoolean("value", false);
+        final Activity activity = getActivity();
+        if (activity instanceof MainActivity) {
+            activity.runOnUiThread(() -> ((MainActivity) activity).setPipPermitido(allowed));
+        }
+        call.resolve();
+    }
+
+    /** Coloca o player em janela flutuante (Picture-in-Picture). */
+    @PluginMethod
+    public void enterPip(PluginCall call) {
+        final Activity activity = getActivity();
+        if (!(activity instanceof MainActivity)) {
+            JSObject ret = new JSObject();
+            ret.put("entered", false);
+            call.resolve(ret);
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            boolean ok = ((MainActivity) activity).entrarEmPip();
+            JSObject ret = new JSObject();
+            ret.put("entered", ok);
+            call.resolve(ret);
+        });
+    }
+
     /** Manda o stream para outro app (VLC, player da TV, etc). */
     @PluginMethod
     public void sendToExternalPlayer(PluginCall call) {

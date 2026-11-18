@@ -1,6 +1,6 @@
 {
-  "versionCode": 6,
-  "versionName": "1.2.3",
-  "apkUrl": "https://github.com/caducosilva/Projetos_Vovo/releases/download/clarice-tv-v1.2.3/CLARICE_TV_1.2.3.apk",
-  "notes": "Links da Globo, Record, SBT, Band e canais abertos/noticias de Sao Paulo atualizados ao vivo."
+  "versionCode": 7,
+  "versionName": "1.2.4",
+  "apkUrl": "https://github.com/caducosilva/Projetos_Vovo/releases/download/clarice-tv-v1.2.4/CLARICE_TV_1.2.4.apk",
+  "notes": "Picture-in-Picture automatico ao sair do app, retomada ao vivo ao voltar e links da Globo atualizados."
 }

@@ -13,6 +13,7 @@ import {
   Search,
   Cast,
   Square,
+  PictureInPicture2,
   Loader2
 } from 'lucide-react';
 import type { Channel, ChannelWithHealth } from '../types';
@@ -106,6 +107,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const hlsRef = useRef<Hls | null>(null);
 
   const [deitado, setDeitado] = useState(false);
+  const [emPip, setEmPip] = useState(false);
+  const emPipRef = useRef(false);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [mostrarControles, setMostrarControles] = useState(true);
@@ -233,8 +236,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     tv.keepAwake(true);
     tv.setBrightness(1.0);
     return () => {
+      tv.setPipAllowed(false);
       tv.setImmersive(false);
     };
+  }, []);
+
+  /** Habilita entrada automatica em PiP ao sair do app enquanto assiste no celular. */
+  useEffect(() => {
+    void tv.setPipAllowed(!isTv && !radio && !tvConectada);
+  }, [isTv, radio, tvConectada]);
+
+  /** Mantem estado sincronizado quando o Android entra ou sai do Picture-in-Picture. */
+  useEffect(() => {
+    const aoMudarPip = (e: Event) => {
+      const ativo = Boolean((e as CustomEvent<{ active?: boolean }>).detail?.active);
+      emPipRef.current = ativo;
+      setEmPip(ativo);
+      if (ativo) {
+        setGavetaAberta(false);
+        setCastAberto(false);
+        setMostrarControles(false);
+        const v = videoRef.current;
+        if (v?.paused) {
+          v.play().catch(() => undefined);
+          setTocando(true);
+        }
+      } else {
+        setMostrarControles(true);
+      }
+    };
+    window.addEventListener('vovo:pip', aoMudarPip);
+    return () => window.removeEventListener('vovo:pip', aoMudarPip);
   }, []);
 
   /**
@@ -674,6 +706,67 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setTentativa((anterior) => anterior + 1);
   }, []);
 
+  /** Retoma transmissao ao vivo automaticamente ao voltar para o app ou destravar a tela. */
+  useEffect(() => {
+    let timerRetomada: number | null = null;
+    let ativo = true;
+
+    const recuperarAoVoltar = () => {
+      if (!ativo || tvConectada || radio) return;
+      const video = videoRef.current;
+      if (!video) return;
+
+      const hls = hlsRef.current;
+      if (hls) {
+        try {
+          hls.startLoad(-1);
+        } catch {
+          /* recarrega abaixo se necessario */
+        }
+      }
+      if (video.paused) {
+        video.play().catch(() => undefined);
+      }
+      setTocando(true);
+
+      const tempoAntes = video.currentTime;
+      if (timerRetomada !== null) window.clearTimeout(timerRetomada);
+      timerRetomada = window.setTimeout(() => {
+        if (!ativo || tvConectada || radio) return;
+        const v = videoRef.current;
+        if (!v) return;
+        const congelado = v.paused || v.readyState < 2 || (Math.abs(v.currentTime - tempoAntes) < 0.05 && v.readyState < 3);
+        if (congelado) {
+          tentarDeNovo();
+        }
+      }, 1800);
+    };
+
+    const onVisibilidade = () => {
+      if (!document.hidden) recuperarAoVoltar();
+    };
+
+    window.addEventListener('vovo:resume', recuperarAoVoltar);
+    document.addEventListener('visibilitychange', onVisibilidade);
+    let removerApp: (() => void) | null = null;
+    CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) recuperarAoVoltar();
+    })
+      .then((h) => {
+        if (!ativo) h.remove();
+        else removerApp = () => h.remove();
+      })
+      .catch(() => undefined);
+
+    return () => {
+      ativo = false;
+      if (timerRetomada !== null) window.clearTimeout(timerRetomada);
+      window.removeEventListener('vovo:resume', recuperarAoVoltar);
+      document.removeEventListener('visibilitychange', onVisibilidade);
+      if (removerApp) removerApp();
+    };
+  }, [tvConectada, radio, tentarDeNovo]);
+
   // --------------------------------------------------------------- controle remoto TV
   /**
    * Guia de canais (a gaveta) no controle remoto: cima e baixo andam pela
@@ -881,8 +974,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Na TV nao aparece botao nenhum: tudo e pelo controle remoto (Voltar,
   // cima/baixo troca de canal, esquerda abre a lista, volume e o da TV).
-  // Os botoes na tela sao so para o celular, que nao tem controle.
-  const barrasNaTela = mostrarControles && !isTv;
+  // Em PiP (miniatura flutuante) esconde menus para mostrar so o video limpo.
+  const barrasNaTela = mostrarControles && !isTv && !emPip;
   const controlesVisiveis = barrasNaTela ? 'opacity-100' : 'pointer-events-none opacity-0';
   const pararPropagacao = {
     onClick: (e: React.SyntheticEvent) => e.stopPropagation(),
@@ -921,7 +1014,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           e.currentTarget.volume = 1.0;
           e.currentTarget.muted = false;
         }}
-        onPause={() => setTocando(false)}
+        onPause={() => {
+          if (emPipRef.current && videoRef.current) {
+            videoRef.current.play().catch(() => undefined);
+            return;
+          }
+          setTocando(false);
+        }}
         playsInline
         className={`h-full w-full object-contain ${radio ? 'hidden' : 'block'}`}
       />
@@ -1063,7 +1162,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           a faixa de baixo, que some sozinha em 3 segundos. */}
       <div
         className={`pointer-events-none absolute top-24 left-4 z-50 flex max-w-[70vw] items-center gap-2.5 rounded-2xl border border-white/15 bg-black/75 px-4 py-2 transition-opacity duration-300 ${
-          carregando || erro ? 'opacity-100' : 'opacity-0'
+          !emPip && (carregando || erro) ? 'opacity-100' : 'opacity-0'
         }`}
       >
         <span
@@ -1078,7 +1177,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       </div>
 
       {/* Aviso de troca rapida de canal */}
-      {hud && hud.tipo === 'canal' && (
+      {!emPip && hud && hud.tipo === 'canal' && (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
           <div className="flex min-w-[12rem] flex-col items-center gap-3 rounded-3xl border border-noite-500 bg-noite-900/95 px-7 py-5">
             <Tv className="h-11 w-11 text-sol-400" strokeWidth={2.5} />
@@ -1150,6 +1249,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </button>
 
         <div className="flex-1" />
+
+        {/* Botao de miniatura (Picture-in-Picture) */}
+        {!isTv && !radio && !tvConectada && !emPip && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              void tv.enterPip();
+            }}
+            className="flex h-toque shrink-0 items-center gap-2 rounded-2xl border-2 border-noite-500 bg-noite-900/90 px-3.5 text-white transition active:scale-95"
+            aria-label="Assistir em janela flutuante"
+          >
+            <PictureInPicture2 className="h-6 w-6 text-sol-400" strokeWidth={2.5} />
+            <span className="hidden text-base font-black sm:inline">Miniatura</span>
+          </button>
+        )}
 
         {/* Rodando direto na TV nao faz sentido "mandar pra TV": ja esta nela */}
         {!isTv && podeMandarParaTv && !radio && (
