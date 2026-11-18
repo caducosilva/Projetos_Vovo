@@ -72,7 +72,7 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
   });
 
   const [health, setHealth] = useState<HealthMap>(() => {
-    limparCacheAntigoDeFontes('2');
+    limparCacheAntigoDeFontes('3');
     return loadHealth();
   });
   const [categoria, setCategoria] = useState<CategoriaFiltro>('todos');

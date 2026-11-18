@@ -50,7 +50,7 @@ export function esquecerFonte(canal: string, url?: string): void {
 }
 
 /** Na troca de versao do app, limpa caches antigos de fontes e saude de sinais mortos. */
-export function limparCacheAntigoDeFontes(versao = '2'): void {
+export function limparCacheAntigoDeFontes(versao = '3'): void {
   const chaveVersao = 'tvdavovo_cache_ver';
   try {
     if (localStorage.getItem(chaveVersao) === versao) return;

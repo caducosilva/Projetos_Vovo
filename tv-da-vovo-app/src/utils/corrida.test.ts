@@ -57,6 +57,11 @@ describe('corrida e memoria de fontes', () => {
     localStorage.setItem('tvdavovo_fonte_boa', '{"Globo":"https://novo"}');
     limparCacheAntigoDeFontes('2');
     expect(localStorage.getItem('tvdavovo_fonte_boa')).toBe('{"Globo":"https://novo"}');
+
+    // Nova versao de cache volta a limpar links antigos
+    limparCacheAntigoDeFontes('3');
+    expect(localStorage.getItem('tvdavovo_fonte_boa')).toBeNull();
+    expect(localStorage.getItem('tvdavovo_cache_ver')).toBe('3');
   });
 });
 
