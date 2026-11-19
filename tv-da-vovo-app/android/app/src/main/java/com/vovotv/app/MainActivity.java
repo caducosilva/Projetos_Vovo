@@ -5,8 +5,10 @@ import android.app.UiModeManager;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.util.Rational;
 import android.view.View;
 import android.view.WindowManager;
@@ -25,8 +27,10 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 
     /** Fundo do app, o mesmo --color-noite-900 do CSS. */
+    private static final String TAG = "ClariceTV";
     private static final int FUNDO = Color.parseColor("#080B11");
     private volatile boolean pipPermitido = false;
+    private final Rect ultimoRectPip = new Rect();
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -60,6 +64,11 @@ public class MainActivity extends BridgeActivity {
                 webView.requestFocus();
 
                 ajustarParaBarrasDoSistema(webView);
+                webView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                    if (pipPermitido && (r - l != or - ol || b - t != ob - ot)) {
+                        atualizarParamsPip();
+                    }
+                });
             }
         } catch (RuntimeException e) {
             e.printStackTrace();
@@ -78,27 +87,56 @@ public class MainActivity extends BridgeActivity {
         return ui != null && ui.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION;
     }
 
+    private Rect calcularAreaVideoPip() {
+        Rect area = new Rect();
+        View alvo = getBridge() != null ? getBridge().getWebView() : null;
+        if (alvo == null) alvo = getWindow() != null ? getWindow().getDecorView() : null;
+        if (alvo == null || !alvo.getGlobalVisibleRect(area) || area.isEmpty()) {
+            return area;
+        }
+        int largura = area.width();
+        int altura = area.height();
+        if (largura <= 0 || altura <= 0) return new Rect();
+
+        // Enquadra um retangulo 16:9 centralizado (sem estourar dimensoes em modo retrato)
+        int alvoAltura = Math.min(altura, Math.round(largura * 9f / 16f));
+        int alvoLargura = Math.min(largura, Math.round(altura * 16f / 9f));
+        int left = area.left + (largura - alvoLargura) / 2;
+        int top = area.top + (altura - alvoAltura) / 2;
+        return new Rect(left, top, left + alvoLargura, top + alvoAltura);
+    }
+
     private PictureInPictureParams criarParamsPip(boolean autoEnter) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null;
         PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
             .setAspectRatio(new Rational(16, 9));
+        Rect sourceRect = calcularAreaVideoPip();
+        if (!sourceRect.isEmpty()) {
+            builder.setSourceRectHint(sourceRect);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setAutoEnterEnabled(autoEnter && !ehTv());
-            builder.setSeamlessResizeEnabled(true);
+            builder.setSeamlessResizeEnabled(!sourceRect.isEmpty());
         }
         return builder.build();
     }
 
+    private void atualizarParamsPip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || ehTv()) return;
+        try {
+            PictureInPictureParams params = criarParamsPip(this.pipPermitido);
+            if (params != null) {
+                ultimoRectPip.set(calcularAreaVideoPip());
+                setPictureInPictureParams(params);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Falha ao atualizar parametros de PiP", e);
+        }
+    }
+
     public void setPipPermitido(boolean permitido) {
         this.pipPermitido = permitido && !ehTv();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !ehTv()) {
-            try {
-                PictureInPictureParams params = criarParamsPip(this.pipPermitido);
-                if (params != null) setPictureInPictureParams(params);
-            } catch (Exception ignored) {
-                // aparelho nao suporta PiP
-            }
-        }
+        atualizarParamsPip();
     }
 
     public boolean entrarEmPip() {
@@ -107,8 +145,17 @@ public class MainActivity extends BridgeActivity {
             PictureInPictureParams params = criarParamsPip(this.pipPermitido);
             return params != null && enterPictureInPictureMode(params);
         } catch (Exception e) {
+            Log.w(TAG, "Nao consegui entrar em PiP", e);
             return false;
         }
+    }
+
+    @Override
+    public boolean onPictureInPictureRequested() {
+        if (pipPermitido && !ehTv() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return entrarEmPip();
+        }
+        return super.onPictureInPictureRequested();
     }
 
     @Override
@@ -118,6 +165,15 @@ public class MainActivity extends BridgeActivity {
             if (!isInPictureInPictureMode()) {
                 entrarEmPip();
             }
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (pipPermitido) {
+            View decor = getWindow() != null ? getWindow().getDecorView() : null;
+            if (decor != null) decor.post(this::atualizarParamsPip);
         }
     }
 
@@ -138,6 +194,9 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         aplicarTelaAcesaEBrilhoMaximo();
+        if (pipPermitido) {
+            atualizarParamsPip();
+        }
         WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView != null) {
             webView.onResume();
@@ -149,6 +208,9 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, @NonNull Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        if (!isInPictureInPictureMode && pipPermitido) {
+            atualizarParamsPip();
+        }
         WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView != null) {
             webView.onResume();

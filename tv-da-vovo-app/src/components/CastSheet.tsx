@@ -130,6 +130,7 @@ export const CastSheet: React.FC<CastSheetProps> = ({
   const [estado, setEstado] = useState<Estado>({ fase: 'procurando' });
   const [passos, setPassos] = useState<PassoDoCast[]>([]);
   const [verDetalhes, setVerDetalhes] = useState(false);
+  const [recemConectada, setRecemConectada] = useState(false);
   const nomeCanal = cleanChannelName(channelName);
 
   const anotar = useCallback((novo: PassoDoCast) => {
@@ -176,13 +177,23 @@ export const CastSheet: React.FC<CastSheetProps> = ({
 
   // Comeca a procurar ao abrir, ou mostra a TV ja espelhada se estiver conectada
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setRecemConectada(false);
+      return;
+    }
     if (connectedTv) {
       setEstado({ fase: 'tocando', nome: connectedTv.name, tv: connectedTv });
       return;
     }
     procurar();
   }, [isOpen, connectedTv, procurar]);
+
+  // Logo apos conectar pela primeira vez, fecha o popup sozinho para liberar o controle grande
+  useEffect(() => {
+    if (!isOpen || !recemConectada || estado.fase !== 'tocando') return;
+    const t = window.setTimeout(() => onClose(), 1100);
+    return () => window.clearTimeout(t);
+  }, [isOpen, recemConectada, estado.fase, onClose]);
 
   const enviar = async (aparelho: TvNaRede) => {
     setEstado({ fase: 'enviando', nome: aparelho.name });
@@ -194,6 +205,7 @@ export const CastSheet: React.FC<CastSheetProps> = ({
     try {
       await mandarParaTv(aparelho, channelUrl, nomeCanal);
       setEstado({ fase: 'tocando', nome: aparelho.name, tv: aparelho });
+      setRecemConectada(true);
       onTvConectada?.(aparelho, channelUrl);
     } catch (error) {
       onVoltaProCelular?.();
