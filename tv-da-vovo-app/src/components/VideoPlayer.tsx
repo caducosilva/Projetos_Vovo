@@ -119,6 +119,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const emPipRef = useRef(false);
   const pausadoPeloUsuarioRef = useRef(false);
   const forcarCorridaRef = useRef(false);
+  const tentarDeNovoRef = useRef<() => void>(() => undefined);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [travandoAviso, setTravandoAviso] = useState(false);
@@ -269,26 +270,82 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   /** Mantem estado sincronizado quando o Android entra ou sai do Picture-in-Picture. */
   useEffect(() => {
+    let timerCheck: number | null = null;
+
     const aoMudarPip = (e: Event) => {
       const ativo = Boolean((e as CustomEvent<{ active?: boolean }>).detail?.active);
       emPipRef.current = ativo;
       setEmPip(ativo);
+      if (timerCheck !== null) {
+        window.clearTimeout(timerCheck);
+        timerCheck = null;
+      }
+
+      const pausado = pausadoPeloUsuarioRef.current;
+      void tv.setPipPlaying(!pausado);
+
       if (ativo) {
         setGavetaAberta(false);
         setCastAberto(false);
         setMostrarControles(false);
         const v = videoRef.current;
-        if (v?.paused) {
-          v.play().catch(() => undefined);
-          setTocando(true);
+        if (v && !pausado) {
+          if (v.paused) {
+            v.play().catch(() => undefined);
+            setTocando(true);
+          }
+          const tempoAntes = v.currentTime;
+          timerCheck = window.setTimeout(() => {
+            if (!emPipRef.current || pausadoPeloUsuarioRef.current) return;
+            const atual = videoRef.current;
+            if (!atual) return;
+            const travou = atual.paused || Math.abs(atual.currentTime - tempoAntes) < 0.05;
+            if (travou) {
+              try {
+                hlsRef.current?.startLoad(-1);
+              } catch {
+                /* vigia continuo recarrega se persistir */
+              }
+              atual.play().catch(() => undefined);
+            }
+          }, 1200);
         }
       } else {
         setMostrarControles(true);
       }
     };
+
+    const aoRecarregarPip = () => {
+      if (tvConectada || radio) return;
+      tentarDeNovoRef.current();
+    };
+
+    const aoIrParaSegundoPlano = () => {
+      if (emPipRef.current || tvConectada || radio) return;
+      // App foi realmente minimizado/bloqueado ou PiP fechado no X:
+      // estaciona o video sem marcar pausa manual para retomar ao reabrir.
+      pausadoPeloUsuarioRef.current = false;
+      try {
+        hlsRef.current?.stopLoad();
+      } catch {
+        /* ok */
+      }
+      const v = videoRef.current;
+      if (v && !v.paused) {
+        v.pause();
+      }
+    };
+
     window.addEventListener('vovo:pip', aoMudarPip);
-    return () => window.removeEventListener('vovo:pip', aoMudarPip);
-  }, []);
+    window.addEventListener('vovo:pip_reload', aoRecarregarPip);
+    window.addEventListener('vovo:background', aoIrParaSegundoPlano);
+    return () => {
+      if (timerCheck !== null) window.clearTimeout(timerCheck);
+      window.removeEventListener('vovo:pip', aoMudarPip);
+      window.removeEventListener('vovo:pip_reload', aoRecarregarPip);
+      window.removeEventListener('vovo:background', aoIrParaSegundoPlano);
+    };
+  }, [radio, tvConectada]);
 
   /**
    * Voltar, igual em todo lugar do player:
@@ -524,6 +581,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         jaTocou = true;
         const latenciaMs = Math.round(performance.now() - iniciadoEm);
         lembrarFonteBoa(channel.id || channel.name, endereco, latenciaMs);
+        void tv.setPipPlaying(!pausadoPeloUsuarioRef.current);
         onPlaybackOk?.(endereco);
       }
     };
@@ -830,12 +888,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!video) return;
     if (video.paused) {
       pausadoPeloUsuarioRef.current = false;
+      try {
+        hlsRef.current?.startLoad(-1);
+      } catch {
+        /* fallback com play abaixo */
+      }
       video.play().catch(() => undefined);
       setTocando(true);
+      void tv.setPipPlaying(true);
     } else {
       pausadoPeloUsuarioRef.current = true;
       video.pause();
       setTocando(false);
+      void tv.setPipPlaying(false);
     }
     reiniciarControles();
   }, [reiniciarControles]);
@@ -849,6 +914,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setReordem((n) => n + 1);
     setTentativa((anterior) => anterior + 1);
   }, []);
+  tentarDeNovoRef.current = tentarDeNovo;
 
   // Reattempt automatico quando todas as fontes falharem ou quando a internet voltar
   useEffect(() => {
@@ -889,7 +955,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     let ativo = true;
 
     const recuperarAoVoltar = () => {
-      if (!ativo || tvConectada || radio) return;
+      if (!ativo || tvConectada || radio || pausadoPeloUsuarioRef.current) return;
       const video = videoRef.current;
       if (!video) return;
 
@@ -905,11 +971,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         video.play().catch(() => undefined);
       }
       setTocando(true);
+      void tv.setPipPlaying(true);
 
       const tempoAntes = video.currentTime;
       if (timerRetomada !== null) window.clearTimeout(timerRetomada);
       timerRetomada = window.setTimeout(() => {
-        if (!ativo || tvConectada || radio) return;
+        if (!ativo || tvConectada || radio || pausadoPeloUsuarioRef.current) return;
         const v = videoRef.current;
         if (!v) return;
         const congelado = v.paused || v.readyState < 2 || (Math.abs(v.currentTime - tempoAntes) < 0.05 && v.readyState < 3);
@@ -1187,17 +1254,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           e.currentTarget.volume = 1.0;
           e.currentTarget.muted = false;
           setTocando(true);
+          void tv.setPipPlaying(true);
         }}
         onPlaying={(e) => {
           e.currentTarget.volume = 1.0;
           e.currentTarget.muted = false;
         }}
         onPause={() => {
-          if (emPipRef.current && videoRef.current) {
+          if (emPipRef.current && !pausadoPeloUsuarioRef.current && videoRef.current) {
             videoRef.current.play().catch(() => undefined);
             return;
           }
           setTocando(false);
+          if (pausadoPeloUsuarioRef.current) {
+            void tv.setPipPlaying(false);
+          }
         }}
         playsInline
         className={`h-full w-full object-contain ${radio ? 'hidden' : 'block'}`}

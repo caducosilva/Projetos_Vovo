@@ -1,11 +1,17 @@
 package com.vovotv.app;
 
+import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
+import android.app.RemoteAction;
 import android.app.UiModeManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -16,6 +22,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -24,13 +31,45 @@ import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.BridgeActivity;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class MainActivity extends BridgeActivity {
 
     /** Fundo do app, o mesmo --color-noite-900 do CSS. */
     private static final String TAG = "ClariceTV";
     private static final int FUNDO = Color.parseColor("#080B11");
+    private static final String ACTION_PIP_TOGGLE_PLAY = "com.vovotv.app.PIP_TOGGLE_PLAY";
+    private static final String ACTION_PIP_RELOAD = "com.vovotv.app.PIP_RELOAD";
+    private static final int REQ_PIP_TOGGLE_PLAY = 101;
+    private static final int REQ_PIP_RELOAD = 102;
+
     private volatile boolean pipPermitido = false;
+    private volatile boolean pipTocando = true;
+    private boolean pipReceiverRegistrado = false;
     private final Rect ultimoRectPip = new Rect();
+
+    private final BroadcastReceiver pipReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null) return;
+            String action = intent.getAction();
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (ACTION_PIP_TOGGLE_PLAY.equals(action)) {
+                pipTocando = !pipTocando;
+                atualizarParamsPip();
+                if (webView != null) {
+                    webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:play_pause'))", null);
+                }
+            } else if (ACTION_PIP_RELOAD.equals(action)) {
+                pipTocando = true;
+                atualizarParamsPip();
+                if (webView != null) {
+                    webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:pip_reload'))", null);
+                }
+            }
+        }
+    };
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -65,7 +104,8 @@ public class MainActivity extends BridgeActivity {
 
                 ajustarParaBarrasDoSistema(webView);
                 webView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-                    if (pipPermitido && (r - l != or - ol || b - t != ob - ot)) {
+                    boolean jaEmPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
+                    if (pipPermitido && !jaEmPip && (r - l != or - ol || b - t != ob - ot)) {
                         atualizarParamsPip();
                     }
                 });
@@ -73,6 +113,30 @@ public class MainActivity extends BridgeActivity {
         } catch (RuntimeException e) {
             e.printStackTrace();
         }
+
+        registrarReceptorPip();
+    }
+
+    private void registrarReceptorPip() {
+        if (pipReceiverRegistrado) return;
+        IntentFilter filtro = new IntentFilter();
+        filtro.addAction(ACTION_PIP_TOGGLE_PLAY);
+        filtro.addAction(ACTION_PIP_RELOAD);
+        ContextCompat.registerReceiver(this, pipReceiver, filtro, ContextCompat.RECEIVER_NOT_EXPORTED);
+        pipReceiverRegistrado = true;
+    }
+
+    @Override
+    public void onDestroy() {
+        if (pipReceiverRegistrado) {
+            try {
+                unregisterReceiver(pipReceiver);
+            } catch (Exception ignored) {
+                /* ja removido */
+            }
+            pipReceiverRegistrado = false;
+        }
+        super.onDestroy();
     }
 
     private void aplicarTelaAcesaEBrilhoMaximo() {
@@ -106,17 +170,46 @@ public class MainActivity extends BridgeActivity {
         return new Rect(left, top, left + alvoLargura, top + alvoAltura);
     }
 
+    private List<RemoteAction> criarAcoesPip() {
+        List<RemoteAction> acoes = new ArrayList<>();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return acoes;
+
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+
+        Intent toggleIntent = new Intent(ACTION_PIP_TOGGLE_PLAY).setPackage(getPackageName());
+        PendingIntent togglePending = PendingIntent.getBroadcast(this, REQ_PIP_TOGGLE_PLAY, toggleIntent, flags);
+        Icon toggleIcon = Icon.createWithResource(
+            this,
+            this.pipTocando ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play
+        );
+        String toggleLabel = this.pipTocando ? "Pausar" : "Continuar";
+        acoes.add(new RemoteAction(toggleIcon, toggleLabel, toggleLabel, togglePending));
+
+        Intent reloadIntent = new Intent(ACTION_PIP_RELOAD).setPackage(getPackageName());
+        PendingIntent reloadPending = PendingIntent.getBroadcast(this, REQ_PIP_RELOAD, reloadIntent, flags);
+        Icon reloadIcon = Icon.createWithResource(this, android.R.drawable.ic_menu_rotate);
+        acoes.add(new RemoteAction(reloadIcon, "Recarregar", "Recarregar canal", reloadPending));
+
+        return acoes;
+    }
+
     private PictureInPictureParams criarParamsPip(boolean autoEnter) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null;
         PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
-            .setAspectRatio(new Rational(16, 9));
-        Rect sourceRect = calcularAreaVideoPip();
-        if (!sourceRect.isEmpty()) {
-            builder.setSourceRectHint(sourceRect);
+            .setAspectRatio(new Rational(16, 9))
+            .setActions(criarAcoesPip());
+
+        boolean jaEmPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
+        if (!jaEmPip) {
+            Rect sourceRect = calcularAreaVideoPip();
+            if (!sourceRect.isEmpty()) {
+                builder.setSourceRectHint(sourceRect);
+            }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setAutoEnterEnabled(autoEnter && !ehTv());
-            builder.setSeamlessResizeEnabled(!sourceRect.isEmpty());
+            // WebView muda o layout ao entrar em PiP: crossfade nativo evita congelamento/distorcao
+            builder.setSeamlessResizeEnabled(false);
         }
         return builder.build();
     }
@@ -126,7 +219,9 @@ public class MainActivity extends BridgeActivity {
         try {
             PictureInPictureParams params = criarParamsPip(this.pipPermitido);
             if (params != null) {
-                ultimoRectPip.set(calcularAreaVideoPip());
+                if (!isInPictureInPictureMode()) {
+                    ultimoRectPip.set(calcularAreaVideoPip());
+                }
                 setPictureInPictureParams(params);
             }
         } catch (Exception e) {
@@ -136,6 +231,12 @@ public class MainActivity extends BridgeActivity {
 
     public void setPipPermitido(boolean permitido) {
         this.pipPermitido = permitido && !ehTv();
+        atualizarParamsPip();
+    }
+
+    public void setPipTocando(boolean tocando) {
+        if (this.pipTocando == tocando) return;
+        this.pipTocando = tocando;
         atualizarParamsPip();
     }
 
@@ -180,13 +281,36 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPause() {
         super.onPause();
-        // Em PiP o Android dispara onPause; mantem o WebView e timers vivos para o video nao congelar.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode()) {
+        // Em PiP (ou durante a transicao automatica de saida para PiP),
+        // mantem o WebView e timers vivos para o video nao congelar.
+        boolean ficandoEmPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+            && (isInPictureInPictureMode() || (pipPermitido && !ehTv()));
+        if (ficandoEmPip) {
             WebView webView = getBridge() != null ? getBridge().getWebView() : null;
             if (webView != null) {
                 webView.onResume();
                 webView.resumeTimers();
             }
+        }
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        boolean emPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView == null) return;
+
+        if (!emPip) {
+            // Saiu do app de verdade (ou fechou o PiP pelo X): pausa video com limpeza
+            // para nao travar o decodificador ao reabrir depois.
+            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('vovo:background'))", null);
+            if (!isChangingConfigurations()) {
+                webView.onPause();
+            }
+        } else {
+            webView.onResume();
+            webView.resumeTimers();
         }
     }
 
@@ -208,13 +332,15 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, @NonNull Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
-        if (!isInPictureInPictureMode && pipPermitido) {
+        if (isInPictureInPictureMode) {
             atualizarParamsPip();
         }
         WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView != null) {
-            webView.onResume();
-            webView.resumeTimers();
+            if (isInPictureInPictureMode) {
+                webView.onResume();
+                webView.resumeTimers();
+            }
             webView.evaluateJavascript(
                 "window.dispatchEvent(new CustomEvent('vovo:pip', { detail: { active: "
                     + isInPictureInPictureMode + " } }))",

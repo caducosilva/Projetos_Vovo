@@ -285,6 +285,17 @@ public class TvBridge extends Plugin {
         call.resolve();
     }
 
+    /** Sincroniza o estado Play/Pause exibido nos controles da janela flutuante PiP. */
+    @PluginMethod
+    public void setPipPlaying(PluginCall call) {
+        final boolean playing = call.getBoolean("value", true);
+        final Activity activity = getActivity();
+        if (activity instanceof MainActivity) {
+            activity.runOnUiThread(() -> ((MainActivity) activity).setPipTocando(playing));
+        }
+        call.resolve();
+    }
+
     /** Coloca o player em janela flutuante (Picture-in-Picture). */
     @PluginMethod
     public void enterPip(PluginCall call) {

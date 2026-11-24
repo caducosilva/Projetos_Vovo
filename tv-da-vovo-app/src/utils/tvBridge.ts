@@ -21,6 +21,7 @@ export interface TvBridgePlugin {
   keepAwake(options: { value: boolean }): Promise<void>;
   setImmersive(options: { value: boolean }): Promise<void>;
   setPipAllowed(options: { value: boolean }): Promise<void>;
+  setPipPlaying(options: { value: boolean }): Promise<void>;
   enterPip(): Promise<{ entered: boolean }>;
   openCastPicker(): Promise<{ opened: boolean; action?: string }>;
   sendToExternalPlayer(options: { url: string; title?: string }): Promise<void>;
@@ -55,6 +56,7 @@ export const tv = {
   keepAwake: (value: boolean) => safe(() => TvBridge.keepAwake({ value })),
   setImmersive: (value: boolean) => safe(() => TvBridge.setImmersive({ value })),
   setPipAllowed: (value: boolean) => safe(() => TvBridge.setPipAllowed({ value })),
+  setPipPlaying: (value: boolean) => safe(() => TvBridge.setPipPlaying({ value })),
   enterPip: () => safe(() => TvBridge.enterPip()),
   openCastPicker: () => safe(() => TvBridge.openCastPicker()),
   sendToExternalPlayer: (url: string, title?: string) =>
