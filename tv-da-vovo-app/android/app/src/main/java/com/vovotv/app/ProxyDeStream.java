@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.GZIPInputStream;
 
 /**
  * Faz na TV o que o painel do PC faz no servidor: busca o stream por fora do
@@ -44,8 +45,9 @@ import java.util.regex.Pattern;
  */
 public class ProxyDeStream extends BridgeWebViewClient {
 
-    private static final int TEMPO_CONEXAO_MS = 6000;
-    private static final int TEMPO_LEITURA_MS = 10000;
+    private static final int TEMPO_CONEXAO_MS = 5000;
+    private static final int TEMPO_LEITURA_MS = 8000;
+    private static final int MAX_REDIRECOES = 5;
     /** Playlist e texto pequeno; o teto so evita segurar um arquivo gigante na memoria. */
     private static final int LIMITE_PLAYLIST_BYTES = 4 * 1024 * 1024;
 
@@ -84,9 +86,13 @@ public class ProxyDeStream extends BridgeWebViewClient {
         try {
             return buscar(request);
         } catch (Exception erro) {
-            // Deixa seguir o caminho normal; o player trata a falha e cai para
-            // a proxima fonte do canal.
-            return super.shouldInterceptRequest(view, request);
+            // Responde 504 imediato com CORS liberado para o hls.js acionar
+            // recuperacao/proxima fonte na hora, sem segunda tentativa travada na WebView.
+            return new WebResourceResponse(
+                "text/plain", "utf-8", 504, "Gateway Timeout",
+                cabecalhosLiberados(new HashMap<>()),
+                new ByteArrayInputStream(new byte[0])
+            );
         }
     }
 
@@ -108,17 +114,43 @@ public class ProxyDeStream extends BridgeWebViewClient {
     }
 
     private WebResourceResponse buscar(WebResourceRequest request) throws Exception {
-        String endereco = request.getUrl().toString();
-        HttpURLConnection conexao = (HttpURLConnection) new URL(endereco).openConnection();
-        conexao.setInstanceFollowRedirects(true); // jmp2.uk responde 302
-        conexao.setConnectTimeout(TEMPO_CONEXAO_MS);
-        conexao.setReadTimeout(TEMPO_LEITURA_MS);
-        conexao.setRequestMethod(request.getMethod() == null ? "GET" : request.getMethod());
-
+        String metodo = request.getMethod() == null ? "GET" : request.getMethod();
         Map<String, String> pedido = request.getRequestHeaders();
-        for (String nome : REPASSADOS) {
-            String valor = valorDe(pedido, nome);
-            if (valor != null) conexao.setRequestProperty(nome, valor);
+        String atual = request.getUrl().toString();
+        HttpURLConnection conexao = null;
+
+        for (int salto = 0; salto <= MAX_REDIRECOES; salto++) {
+            HttpURLConnection tentativa = (HttpURLConnection) new URL(atual).openConnection();
+            tentativa.setInstanceFollowRedirects(false);
+            tentativa.setConnectTimeout(TEMPO_CONEXAO_MS);
+            tentativa.setReadTimeout(TEMPO_LEITURA_MS);
+            tentativa.setRequestMethod(metodo);
+            for (String nome : REPASSADOS) {
+                String valor = valorDe(pedido, nome);
+                if (valor != null) tentativa.setRequestProperty(nome, valor);
+            }
+
+            int status = tentativa.getResponseCode();
+            if (status == HttpURLConnection.HTTP_MOVED_PERM
+                || status == HttpURLConnection.HTTP_MOVED_TEMP
+                || status == HttpURLConnection.HTTP_SEE_OTHER
+                || status == 307
+                || status == 308) {
+                String destino = tentativa.getHeaderField("Location");
+                tentativa.disconnect();
+                if (destino == null || destino.isEmpty()) {
+                    throw new java.io.IOException("Redirecionamento sem destino");
+                }
+                atual = new URI(atual).resolve(destino).toString();
+                continue;
+            }
+
+            conexao = tentativa;
+            break;
+        }
+
+        if (conexao == null) {
+            throw new java.io.IOException("Excesso de redirecionamentos");
         }
 
         int codigo = conexao.getResponseCode();
@@ -158,10 +190,11 @@ public class ProxyDeStream extends BridgeWebViewClient {
 
         // O endereco que valeu no fim: e contra ele que os caminhos relativos
         // da playlist tem de ser resolvidos.
-        String enderecoFinal = conexao.getURL() != null ? conexao.getURL().toString() : endereco;
+        String enderecoFinal = conexao.getURL() != null ? conexao.getURL().toString() : atual;
 
         if (codigo < 400 && ehPlaylist(enderecoFinal, tipo)) {
-            byte[] bruto = lerTudo(corpo, LIMITE_PLAYLIST_BYTES);
+            byte[] bruto = descompactarSeGzip(lerTudo(corpo, LIMITE_PLAYLIST_BYTES));
+            conexao.disconnect();
             String texto = new String(bruto, StandardCharsets.UTF_8);
             if (texto.contains("#EXTM3U")) {
                 byte[] arrumado = absolutizar(texto, enderecoFinal).getBytes(StandardCharsets.UTF_8);
@@ -176,6 +209,17 @@ public class ProxyDeStream extends BridgeWebViewClient {
         return new WebResourceResponse(
             tipo, codificacao, codigo, motivo, cabecalhosLiberados(resposta), corpo
         );
+    }
+
+    private static byte[] descompactarSeGzip(byte[] bruto) {
+        if (bruto.length < 2 || (bruto[0] & 0xff) != 0x1f || (bruto[1] & 0xff) != 0x8b) {
+            return bruto;
+        }
+        try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(bruto))) {
+            return lerTudo(gzip, LIMITE_PLAYLIST_BYTES);
+        } catch (Exception ignored) {
+            return bruto;
+        }
     }
 
     private static boolean ehPlaylist(String endereco, String tipo) {

@@ -1,6 +1,6 @@
 {
-  "versionCode": 8,
-  "versionName": "1.2.5",
-  "apkUrl": "https://github.com/caducosilva/Projetos_Vovo/releases/download/clarice-tv-v1.2.5/CLARICE_TV_1.2.5.apk",
-  "notes": "Picture-in-Picture automatico em tela cheia e ao sair para a tela inicial, alem de fechar o aviso ao espelhar na TV."
+  "versionCode": 9,
+  "versionName": "1.2.6",
+  "apkUrl": "https://github.com/caducosilva/Projetos_Vovo/releases/download/clarice-tv-v1.2.6/CLARICE_TV_1.2.6.apk",
+  "notes": "Auto-reload inteligente contra tela cinza e travamentos, monitoramento continuo de conexao em segundo plano, fontes auto-otimizadas por desempenho e novos links estaveis."
 }

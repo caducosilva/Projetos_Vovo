@@ -20,8 +20,8 @@
     "url": "https://origin-01.bariguitelecom.com.br/RECORD_SP/index.m3u8",
     "sources": [
       "https://origin-01.bariguitelecom.com.br/RECORD_SP/index.m3u8",
-      "https://cdn.jmvstream.com/w/LVW-10842/LVW10842_513N26MDBL/chunklist.m3u8",
-      "https://cdn.jmvstream.com/w/LVW-10842/LVW10842_513N26MDBL/playlist.m3u8"
+      "https://cdn.jmvstream.com/w/LVW-10842/LVW10842_513N26MDBL/playlist.m3u8",
+      "https://cdn.jmvstream.com/w/LVW-10842/LVW10842_513N26MDBL/chunklist.m3u8"
     ],
     "logo": "https://upload.wikimedia.org/wikipedia/pt/thumb/1/10/Logotipo_da_Record.png/960px-Logotipo_da_Record.png",
     "group": "Abertos SP",
@@ -35,9 +35,6 @@
     "url": "https://origin-01.bariguitelecom.com.br/SBT_SP/index.m3u8",
     "sources": [
       "https://origin-01.bariguitelecom.com.br/SBT_SP/index.m3u8",
-      "https://cdn.live.br1.jmvstream.com/w/LVW-10801/LVW10801_Xvg4R0u57n/playlist.m3u8",
-      "https://cdn.live.br1.jmvstream.com/w/LVW-10801/LVW10801_Xvg4R0u57n/chunklist.m3u8",
-      "https://cdn.jmvstream.com/w/LVW-10801/LVW10801_Xvg4R0u57n/playlist.m3u8",
       "https://6836041ea1117.streamlock.net/cverde/cverde/playlist.m3u8"
     ],
     "logo": "https://logodownload.org/wp-content/uploads/2013/12/sbt-logo.png",
@@ -68,8 +65,8 @@
       "https://origin-01.bariguitelecom.com.br/REDE_TV/index.m3u8",
       "http://186.219.52.187/rede_tv/index.m3u8",
       "http://170.83.16.50/REDE_TV/index.m3u8",
-      "http://170.83.49.66:8083/REDETVHD/index.m3u8",
-      "https://cdn.live.br1.jmvstream.com/webtv/AVJ-15235/playlist/playlist.m3u8"
+      "https://cdn.live.br1.jmvstream.com/webtv/AVJ-15235/playlist/playlist.m3u8",
+      "https://tv01.zas.media:1936/redetvparana/redetvparana/playlist.m3u8"
     ],
     "logo": "https://i.imgur.com/ZJgD38F.png",
     "group": "Abertos SP",
@@ -87,7 +84,6 @@
       "http://186.219.52.187/cultura/index.m3u8",
       "https://player-tvcultura.stream.uol.com.br/live/tvcultura.m3u8",
       "https://fpa-gateway.tvcultura.com.br:8181/memfs/606caef0-a290-413d-9f1f-8fcdb3a73831.m3u8",
-      "https://v-us-01.wisestream.io/memfs/e8740862-7a1f-45f3-acb2-4f357e144059.m3u8",
       "https://jmp2.uk/plu-62e010e6cd663f0007e57dc8.m3u8"
     ],
     "logo": "https://upload.wikimedia.org/wikipedia/commons/8/82/Cultura_logo_2013.svg",
@@ -150,7 +146,6 @@
     "sources": [
       "https://origin-01.bariguitelecom.com.br/CNN_BRASIL/index.m3u8",
       "http://170.83.16.50/CNN_BRASIL/index.m3u8",
-      "http://170.83.49.66:8083/CNNBRASILHD/index.m3u8",
       "https://d25usgadhphvwi.cloudfront.net/hls/main.m3u8",
       "https://d25usgadhphvwi.cloudfront.net/v1/master/3722c60a815c199d9c0ef36c5b73da68a62b09d1/cc-y4riz7eo92zpm/hls/main.m3u8"
     ],
@@ -221,9 +216,8 @@
   {
     "id": "TimesBrasil.br",
     "name": "Times Brasil",
-    "url": "https://ssai2-ads.api.leiniao.com/global-adinsertion-api/hls/live/v2/21fdb6dd7491406bba86497a24390a25/playlist.m3u8",
+    "url": "https://jmp2.uk/plu-679a973a97782f0008ff4bb6.m3u8",
     "sources": [
-      "https://ssai2-ads.api.leiniao.com/global-adinsertion-api/hls/live/v2/21fdb6dd7491406bba86497a24390a25/playlist.m3u8",
       "https://jmp2.uk/plu-679a973a97782f0008ff4bb6.m3u8"
     ],
     "logo": "https://i.ibb.co/yTZgcyQ/timesbr.jpg",
@@ -258,8 +252,9 @@
   {
     "id": "AgroMais.br",
     "name": "AgroMais",
-    "url": "http://170.83.16.50/AGRO_MAIS/index.m3u8",
+    "url": "https://origin-01.bariguitelecom.com.br/AGRO_MAIS/index.m3u8",
     "sources": [
+      "https://origin-01.bariguitelecom.com.br/AGRO_MAIS/index.m3u8",
       "http://170.83.16.50/AGRO_MAIS/index.m3u8"
     ],
     "logo": "https://i.imgur.com/sFcOZeo.png",
@@ -270,8 +265,9 @@
   {
     "id": "Futura.br",
     "name": "Canal Futura",
-    "url": "https://origin-01.bariguitelecom.com.br/FUTURA/index.m3u8",
+    "url": "http://170.83.16.50/FUTURA/index.m3u8",
     "sources": [
+      "http://170.83.16.50/FUTURA/index.m3u8",
       "https://origin-01.bariguitelecom.com.br/FUTURA/index.m3u8",
       "http://186.219.52.187/futura/index.m3u8",
       "http://170.83.49.66:8083/FUTURAHD/index.m3u8"
@@ -318,8 +314,9 @@
   {
     "id": "TVCancaoNova.br",
     "name": "TV Canção Nova",
-    "url": "http://170.83.16.50/CANCAO_NOVA/index.m3u8",
+    "url": "https://origin-01.bariguitelecom.com.br/CANCAO_NOVA/index.m3u8",
     "sources": [
+      "https://origin-01.bariguitelecom.com.br/CANCAO_NOVA/index.m3u8",
       "http://170.83.16.50/CANCAO_NOVA/index.m3u8",
       "http://186.219.52.187/cancao_nova/index.m3u8"
     ],
@@ -331,8 +328,10 @@
   {
     "id": "RedeBrasil.br",
     "name": "Rede Brasil",
-    "url": "http://170.83.49.66:8083/REDEBRASILHD/index.m3u8",
+    "url": "https://video09.logicahost.com.br/redebrasiloficial/redebrasiloficial/playlist.m3u8",
     "sources": [
+      "https://video09.logicahost.com.br/redebrasiloficial/redebrasiloficial/playlist.m3u8",
+      "https://redebrasil.nuvemplay.live/hls/stream.m3u8",
       "http://170.83.49.66:8083/REDEBRASILHD/index.m3u8"
     ],
     "logo": "https://i.imgur.com/TXJKwzZ.png",
@@ -344,9 +343,8 @@
   {
     "id": "RedeGospel.br",
     "name": "Rede Gospel",
-    "url": "http://170.83.49.66:8083/REDEGOSPELHD/index.m3u8",
+    "url": "https://cdn.live.br1.jmvstream.com/w/LVW-8719/LVW8719_AcLVAxWy5J/playlist.m3u8",
     "sources": [
-      "http://170.83.49.66:8083/REDEGOSPELHD/index.m3u8",
       "https://cdn.live.br1.jmvstream.com/w/LVW-8719/LVW8719_AcLVAxWy5J/playlist.m3u8",
       "https://redegospel-aovivo.nuvemplay.live/hls/stream.m3u8"
     ],
@@ -407,8 +405,9 @@
   {
     "id": "SESCTV.br",
     "name": "SESC TV",
-    "url": "http://170.83.49.66:8083/SESCTVHD/index.m3u8",
+    "url": "http://186.219.52.187/sesc_tv/index.m3u8",
     "sources": [
+      "http://186.219.52.187/sesc_tv/index.m3u8",
       "http://170.83.49.66:8083/SESCTVHD/index.m3u8"
     ],
     "logo": "https://i.imgur.com/Mu8O6CV.png",
@@ -458,9 +457,8 @@
   {
     "id": "TVSenado.br",
     "name": "TV Senado",
-    "url": "https://origin-01.bariguitelecom.com.br/TV_SENADO/index.m3u8",
+    "url": "http://170.83.16.50/TV_SENADO/index.m3u8",
     "sources": [
-      "https://origin-01.bariguitelecom.com.br/TV_SENADO/index.m3u8",
       "http://170.83.16.50/TV_SENADO/index.m3u8",
       "http://186.219.52.187/tv_senado/index.m3u8",
       "http://170.83.49.66:8083/TVSENADOHD/index.m3u8"

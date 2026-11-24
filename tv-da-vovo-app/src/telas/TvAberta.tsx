@@ -14,7 +14,7 @@ import type { HealthMap, ProbeResult } from '../utils/health';
 import type { AvailableUpdate } from '../utils/updater';
 import { dedupe } from '../utils/channelList';
 import { fontesDoCanal, saudeDoCanal, compararPorNome } from '../utils/fontes';
-import { limparCacheAntigoDeFontes } from '../utils/corrida';
+import { limparCacheAntigoDeFontes, registrarDesempenhoFonte } from '../utils/corrida';
 import { buscarCanaisDeCamera, ehCanalDeCamera } from '../utils/cameras';
 import { carregarCanaisEmCache, buscarCanaisRemotos } from '../utils/canaisRemotos';
 import { tv } from '../utils/tvBridge';
@@ -26,10 +26,12 @@ import { ChannelCard } from '../components/ChannelCard';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { SettingsSheet } from '../components/SettingsSheet';
 import { UpdatePrompt } from '../components/UpdatePrompt';
-import { SearchX, Plus } from 'lucide-react';
+import { SearchX, Plus, WifiOff } from 'lucide-react';
 
 const PROBE_WORKERS = 4;
-const PROBE_LOTE = 60;
+const PROBE_LOTE = 80;
+const INTERVALO_PROBE_MS = 2 * 60_000;
+const INTERVALO_REMOTO_MS = 5 * 60_000;
 // Todos os canais de uma vez: sem botao de "mostrar mais" na tela da vovo
 const PAGINA = 500;
 const COLS = 5;
@@ -72,9 +74,12 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
   });
 
   const [health, setHealth] = useState<HealthMap>(() => {
-    limparCacheAntigoDeFontes('3');
+    limparCacheAntigoDeFontes('4');
     return loadHealth();
   });
+  const [semInternet, setSemInternet] = useState(
+    () => typeof navigator !== 'undefined' && navigator.onLine === false
+  );
   const [categoria, setCategoria] = useState<CategoriaFiltro>('todos');
   const [avisoSair, setAvisoSair] = useState(false);
   const ultimoVoltarRef = useRef(0);
@@ -90,6 +95,8 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
   const [topNav, setTopNav] = useState<'none' | 'settings'>('none');
 
   const [activeChannel, setActiveChannel] = useState<ChannelWithHealth | null>(null);
+  const activeChannelRef = useRef<ChannelWithHealth | null>(null);
+  activeChannelRef.current = activeChannel;
   const [playerList, setPlayerList] = useState<ChannelWithHealth[]>([]);
 
   const [ajustesAbertos, setAjustesAbertos] = useState(false);
@@ -194,6 +201,7 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
 
   const handleProbeResult = useCallback(
     (url: string, resultado: ProbeResult) => {
+      registrarDesempenhoFonte(url, resultado.ok, resultado.latency_ms);
       const proximo = { ...healthRef.current };
       proximo[url] = applyProbeResult(proximo[url], resultado);
       commitHealth(proximo);
@@ -204,6 +212,7 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
 
   const handlePlaybackOk = useCallback(
     (url: string) => {
+      registrarDesempenhoFonte(url, true);
       const proximo = { ...healthRef.current };
       proximo[url] = markConfirmed(proximo[url]);
       commitHealth(proximo);
@@ -213,6 +222,7 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
 
   const handlePlaybackFail = useCallback(
     (url: string, erro: string) => {
+      registrarDesempenhoFonte(url, false);
       const proximo = { ...healthRef.current };
       proximo[url] = markPlaybackFail(proximo[url], erro);
       commitHealth(proximo);
@@ -224,11 +234,13 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
   const startProbe = useCallback(
     async (urls: string[]) => {
       if (urls.length === 0 || rodandoRef.current) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       rodandoRef.current = true;
       pararRef.current = false;
       setProbeState({ running: true, done: 0, total: urls.length });
 
-      await runBatchProbe(urls, PROBE_WORKERS, handleProbeResult, () => pararRef.current);
+      const workers = activeChannelRef.current ? 2 : PROBE_WORKERS;
+      await runBatchProbe(urls, workers, handleProbeResult, () => pararRef.current);
 
       rodandoRef.current = false;
       setProbeState((anterior) => ({ ...anterior, running: false }));
@@ -244,41 +256,89 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
     setProbeState((anterior) => ({ ...anterior, running: false }));
   }, []);
 
-  const urlsPendentes = useCallback(() => {
-    return channels
-      .flatMap((c) => fontesDoCanal(c))
-      .filter((url) => {
-        const entrada = healthRef.current[url];
-        return !entrada || entrada.status !== 'confirmed' || isStale(entrada);
-      });
-  }, [channels]);
+  const urlsPendentes = useCallback(
+    (incluirFracas = false) => {
+      const vistas = new Set<string>();
+      const prioritarias: string[] = [];
+      const secundarias: string[] = [];
+
+      const adicionar = (url: string, prioritaria: boolean) => {
+        if (!url || vistas.has(url)) return;
+        vistas.add(url);
+        if (prioritaria) prioritarias.push(url);
+        else secundarias.push(url);
+      };
+
+      // 1. Reservas do canal assistido agora tem prioridade maxima
+      if (activeChannelRef.current) {
+        for (const url of fontesDoCanal(activeChannelRef.current)) {
+          const entrada = healthRef.current[url];
+          if (incluirFracas || !entrada || isStale(entrada, 3)) {
+            adicionar(url, true);
+          }
+        }
+      }
+
+      // 2. Canais sem nenhuma fonte boa e links instaveis/vencidos
+      for (const canal of channels) {
+        const fontes = fontesDoCanal(canal);
+        const temBoa = fontes.some((u) => {
+          const e = healthRef.current[u];
+          return e && (e.status === 'ok' || e.status === 'confirmed') && !isStale(e);
+        });
+        for (const url of fontes) {
+          const entrada = healthRef.current[url];
+          const fraca = !entrada || entrada.status === 'doubt' || entrada.status === 'dead';
+          if (!entrada || !temBoa || (incluirFracas && fraca) || entrada.status !== 'confirmed' || isStale(entrada)) {
+            adicionar(url, !temBoa || fraca);
+          }
+        }
+      }
+
+      return [...prioritarias, ...secundarias];
+    },
+    [channels]
+  );
 
   const handleStartProbe = useCallback(() => {
-    const pendentes = urlsPendentes();
+    const pendentes = urlsPendentes(true);
     const alvo = pendentes.length > 0 ? pendentes : channels.flatMap((c) => fontesDoCanal(c));
     startProbe(alvo.slice(0, PROBE_LOTE));
   }, [channels, startProbe, urlsPendentes]);
 
   /**
-   * Testa os canais sozinho, em segundo plano, sem a vovo precisar pedir.
-   *
-   * Primeiro teste 2.5s depois de abrir o app; depois disso, de tempos em
-   * tempos, revê os que ficaram "velhos" (STALE_MINUTES) ou nunca foram
-   * confirmados. Canal marcado como morto some da grade sozinho, porque
-   * filteredChannels ja esconde health === 'dead'. Nada disso aparece na
-   * tela: so roda quieto, a nao ser que a vovo abra os Ajustes.
+   * Monitoramento continuo e silencioso em segundo plano:
+   * - verifica os sinais a cada 2 minutos (2 workers se um canal estiver aberto, 4 na grade)
+   * - revalida na hora quando a internet cai e volta ('online') ou o app volta do segundo plano
+   * - alimenta corrida.ts para as fontes mais rapidas e estaveis subirem sozinhas.
    */
   useEffect(() => {
-    const rodarSeTiverPendente = () => {
-      const pendentes = urlsPendentes();
-      if (pendentes.length > 0) startProbe(pendentes.slice(0, PROBE_LOTE));
+    const rodarSeTiverPendente = (forcarFracas = false) => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      if (document.hidden && !activeChannelRef.current) return;
+      const pendentes = urlsPendentes(forcarFracas);
+      if (pendentes.length > 0) void startProbe(pendentes.slice(0, PROBE_LOTE));
     };
 
-    const primeiro = window.setTimeout(rodarSeTiverPendente, 2500);
-    const periodico = window.setInterval(rodarSeTiverPendente, 30 * 60_000);
+    const aoFicarOffline = () => setSemInternet(true);
+    const aoVoltarOnline = () => {
+      setSemInternet(false);
+      rodarSeTiverPendente(true);
+    };
+    const aoRetomar = () => rodarSeTiverPendente(false);
+
+    const primeiro = window.setTimeout(() => rodarSeTiverPendente(false), 2500);
+    const periodico = window.setInterval(() => rodarSeTiverPendente(false), INTERVALO_PROBE_MS);
+    window.addEventListener('online', aoVoltarOnline);
+    window.addEventListener('offline', aoFicarOffline);
+    window.addEventListener('vovo:resume', aoRetomar);
+
     return () => {
       window.clearTimeout(primeiro);
       window.clearInterval(periodico);
+      window.removeEventListener('online', aoVoltarOnline);
+      window.removeEventListener('offline', aoFicarOffline);
+      window.removeEventListener('vovo:resume', aoRetomar);
     };
   }, [urlsPendentes, startProbe]);
 
@@ -350,6 +410,17 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
     let ativo = true;
     void sincronizarCanaisRemotos(controle.signal);
 
+    const periodico = window.setInterval(() => {
+      if (ativo && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+        void sincronizarCanaisRemotos();
+      }
+    }, INTERVALO_REMOTO_MS);
+
+    const aoVoltarOnline = () => {
+      if (ativo) void sincronizarCanaisRemotos();
+    };
+    window.addEventListener('online', aoVoltarOnline);
+
     let remover: (() => void) | null = null;
     CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       if (isActive && ativo) void sincronizarCanaisRemotos();
@@ -363,6 +434,8 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
     return () => {
       ativo = false;
       controle.abort();
+      window.clearInterval(periodico);
+      window.removeEventListener('online', aoVoltarOnline);
       if (remover) remover();
     };
   }, [sincronizarCanaisRemotos]);
@@ -568,6 +641,16 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
       </div>
 
       <main className="area-segura-lados area-segura-base mx-auto w-full max-w-[1750px] flex-1 overflow-x-hidden px-4 py-4 sm:px-6">
+        {semInternet && (
+          <div
+            role="status"
+            className="mb-4 flex items-center gap-3 rounded-2xl border-2 border-alerta-400/60 bg-alerta-400/15 px-4 py-3 text-base font-black text-tinta-100"
+          >
+            <WifiOff className="h-6 w-6 shrink-0 text-alerta-400" strokeWidth={2.5} />
+            <span>Sem internet no momento. Reconectando automaticamente assim que o Wi-Fi voltar.</span>
+          </div>
+        )}
+
         <div className="mb-4 flex gap-2">
           {(
             [
@@ -657,6 +740,7 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
           onNextChannel={playerList.length > 1 ? () => irParaCanal(1) : undefined}
           onPlaybackOk={handlePlaybackOk}
           onPlaybackFail={handlePlaybackFail}
+          onRefreshSources={() => void sincronizarCanaisRemotos()}
         />
       )}
 

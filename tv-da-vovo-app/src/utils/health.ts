@@ -23,7 +23,30 @@ export type HealthMap = Record<string, HealthEntry>;
 
 const STORAGE_KEY = 'vovo_tv_health';
 const FAILS_TO_DEAD = 3;
-export const STALE_MINUTES = 45;
+export const STALE_MINUTES = 10;
+
+export function ehPlaylistHlsValida(texto: string): boolean {
+  if (!texto || !texto.includes('#EXTM3U')) return false;
+  return (
+    texto.includes('#EXTINF') ||
+    texto.includes('#EXT-X-STREAM-INF') ||
+    /\.(ts|m4s|aac|mp4|m3u8)(\?|$)/im.test(texto)
+  );
+}
+
+export function primeiraVarianteM3u8(texto: string, baseUrl: string): string | null {
+  if (!texto.includes('#EXT-X-STREAM-INF')) return null;
+  for (const linhaBruta of texto.split(/\r?\n/)) {
+    const linha = linhaBruta.trim();
+    if (!linha || linha.startsWith('#')) continue;
+    try {
+      return new URL(linha, baseUrl).toString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 export function emptyEntry(): HealthEntry {
   return {
@@ -174,10 +197,34 @@ export async function probeChannel(url: string, timeoutMs = 5000): Promise<Probe
         responseType: 'text'
       });
       const body = typeof res.data === 'string' ? res.data : '';
-      if (res.status >= 200 && res.status < 400 && (body.includes('#EXTM3U') || body.length > 0)) {
-        return { ok: true, latency_ms: elapsed(), bytes: body.length };
+      if (res.status < 200 || res.status >= 400) {
+        return { ok: false, error: `http ${res.status}`, latency_ms: elapsed() };
       }
-      return { ok: false, error: `http ${res.status}`, latency_ms: elapsed() };
+      if (!ehPlaylistHlsValida(body)) {
+        return { ok: false, error: 'playlist invalida ou vazia', latency_ms: elapsed() };
+      }
+
+      // Se for playlist mestre, confirma tambem que a variante listada entrega segmentos
+      const baseFinal = typeof res.url === 'string' && res.url ? res.url : url;
+      const variante = primeiraVarianteM3u8(body, baseFinal);
+      if (variante) {
+        const resVar = await CapacitorHttp.request({
+          ...common,
+          url: variante,
+          method: 'GET',
+          responseType: 'text'
+        });
+        const bodyVar = typeof resVar.data === 'string' ? resVar.data : '';
+        if (resVar.status < 200 || resVar.status >= 400 || !ehPlaylistHlsValida(bodyVar)) {
+          return {
+            ok: false,
+            error: resVar.status >= 400 ? `http ${resVar.status}` : 'variante vazia',
+            latency_ms: elapsed()
+          };
+        }
+      }
+
+      return { ok: true, latency_ms: elapsed(), bytes: body.length };
     }
 
     // Stream de audio ou direto (MP3 / AAC / Shoutcast / Icecast / TS).
