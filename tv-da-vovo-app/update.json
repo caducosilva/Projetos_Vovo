@@ -1,6 +1,6 @@
 {
-  "versionCode": 10,
-  "versionName": "1.2.7",
-  "apkUrl": "https://github.com/caducosilva/Projetos_Vovo/releases/download/clarice-tv-v1.2.7/CLARICE_TV_1.2.7.apk",
-  "notes": "Controles Pausar, Continuar e Recarregar direto na janela Picture-in-Picture e correcao definitiva de travamentos ao entrar ou sair do modo miniatura."
+  "versionCode": 11,
+  "versionName": "1.2.8",
+  "apkUrl": "https://github.com/caducosilva/Projetos_Vovo/releases/download/clarice-tv-v1.2.8/CLARICE_TV_1.2.8.apk",
+  "notes": "Corrige reinicios frequentes durante a reproducao: verificacoes seguem silenciosas em segundo plano e o auto-reload so entra em acao quando o canal travar de fato."
 }

@@ -100,6 +100,8 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
   const [playerList, setPlayerList] = useState<ChannelWithHealth[]>([]);
 
   const [ajustesAbertos, setAjustesAbertos] = useState(false);
+  const ajustesAbertosRef = useRef(false);
+  ajustesAbertosRef.current = ajustesAbertos;
   const [atualizacao, setAtualizacao] = useState<AvailableUpdate | null>(null);
   const [tvConectada, setTvConectada] = useState<TvNaRede | null>(null);
   const [canalNaTv, setCanalNaTv] = useState('');
@@ -204,8 +206,12 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
       registrarDesempenhoFonte(url, resultado.ok, resultado.latency_ms);
       const proximo = { ...healthRef.current };
       proximo[url] = applyProbeResult(proximo[url], resultado);
-      commitHealth(proximo);
-      setProbeState((anterior) => ({ ...anterior, done: anterior.done + 1 }));
+      healthRef.current = proximo;
+      // Enquanto assiste a um canal (com Ajustes fechados), evita re-renders da grade a cada URL
+      if (ajustesAbertosRef.current || !activeChannelRef.current) {
+        commitHealth(proximo);
+        setProbeState((anterior) => ({ ...anterior, done: anterior.done + 1 }));
+      }
     },
     [commitHealth]
   );
@@ -403,6 +409,15 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
       const proprios = anterior.filter((c) => c.isCustom && !ehCanalDeCamera(c));
       return dedupe([...cameras, ...remotos, ...proprios]);
     });
+  }, []);
+
+  const handleRefreshSources = useCallback(() => {
+    void sincronizarCanaisRemotos();
+  }, [sincronizarCanaisRemotos]);
+
+  const handleTvConectada = useCallback((aparelho: TvNaRede, nome: string) => {
+    setTvConectada(aparelho);
+    setCanalNaTv(nome);
   }, []);
 
   useEffect(() => {
@@ -726,10 +741,7 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
           isTv={souTv}
           channelList={playerList}
           tvConectada={tvConectada}
-          onTvConectada={(aparelho, nome) => {
-            setTvConectada(aparelho);
-            setCanalNaTv(nome);
-          }}
+          onTvConectada={handleTvConectada}
           onDesconectarTv={desconectarTv}
           onSelectChannel={(canal) => {
             setActiveChannel(canal as ChannelWithHealth);
@@ -740,7 +752,7 @@ export default function TvAberta({ onVoltarInicio }: { onVoltarInicio: () => voi
           onNextChannel={playerList.length > 1 ? () => irParaCanal(1) : undefined}
           onPlaybackOk={handlePlaybackOk}
           onPlaybackFail={handlePlaybackFail}
-          onRefreshSources={() => void sincronizarCanaisRemotos()}
+          onRefreshSources={handleRefreshSources}
         />
       )}
 

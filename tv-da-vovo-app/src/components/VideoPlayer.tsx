@@ -142,6 +142,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const fontes = useMemo(() => (chaveFontes ? chaveFontes.split('\n') : []), [chaveFontes]);
   const [indiceFonte, setIndiceFonte] = useState(0);
 
+  /** URL que esta tocando agora e se ainda ha reserva depois dela. */
+  const [ordem, setOrdem] = useState<string[] | null>(null);
+  const endereco = ordem ? ordem[Math.min(indiceFonte, ordem.length - 1)] || '' : '';
+  const temReserva = !!ordem && indiceFonte + 1 < ordem.length;
+
+  // Refs mantem callbacks e metadados fora dos arrays de dependencia dos efeitos
+  // para que re-renders do componente pai nunca reiniciem o player de video.
+  const channelRef = useRef(channel);
+  channelRef.current = channel;
+  const indiceFonteRef = useRef(indiceFonte);
+  indiceFonteRef.current = indiceFonte;
+  const temReservaRef = useRef(temReserva);
+  temReservaRef.current = temReserva;
+  const callbacksRef = useRef({
+    onPlaybackOk,
+    onPlaybackFail,
+    onRefreshSources,
+    onChannelExhausted,
+    onTvConectada
+  });
+  callbacksRef.current = {
+    onPlaybackOk,
+    onPlaybackFail,
+    onRefreshSources,
+    onChannelExhausted,
+    onTvConectada
+  };
+
   /**
    * Ordem em que as fontes vao ser tentadas. Antes era a ordem fixa da lista,
    * esperando ate 20s em cada URL morta: canal com tres fontes ruins na frente
@@ -149,7 +177,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
    * primeiro e, sem ela, todas sao consultadas AO MESMO TEMPO e a primeira que
    * responder com playlist valida e a que toca (ver utils/corrida.ts).
    */
-  const [ordem, setOrdem] = useState<string[] | null>(null);
   useEffect(() => {
     setIndiceFonte(0);
     setOrdem(null);
@@ -159,19 +186,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (fontes.length === 0) return;
     const forcarCorrida = forcarCorridaRef.current;
     forcarCorridaRef.current = false;
+    const atual = channelRef.current;
     const controle = new AbortController();
-    ordenarFontes(channel?.id || channel?.name || '', fontes, controle.signal, {
+    ordenarFontes(atual?.id || atual?.name || '', fontes, controle.signal, {
       forcarCorrida
     }).then((r) => {
       if (!controle.signal.aborted) setOrdem(r);
     });
     return () => controle.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontes, reordem]);
-
-  /** URL que esta tocando agora e se ainda ha reserva depois dela. */
-  const endereco = ordem ? ordem[Math.min(indiceFonte, ordem.length - 1)] || '' : '';
-  const temReserva = !!ordem && indiceFonte + 1 < ordem.length;
 
   /** Sobe a cada tecla/toque: a faixa com nome e programa reaparece por 3s. */
   const [reacender, setReacender] = useState(0);
@@ -485,14 +508,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setEnviandoParaTv(false);
         setErroNaTv(null);
         lembrarFonteBoa(channel.id || channel.name, endereco);
-        onPlaybackOk?.(endereco);
-        onTvConectada?.(tvConectada, nomeCanal);
+        callbacksRef.current.onPlaybackOk?.(endereco);
+        callbacksRef.current.onTvConectada?.(tvConectada, nomeCanal);
       })
       .catch((e) => {
         if (cancelado) return;
         esquecerFonte(channel.id || channel.name, endereco);
-        onPlaybackFail?.(endereco, e instanceof Error ? e.message : 'erro ao espelhar na TV');
-        if (temReserva) {
+        callbacksRef.current.onPlaybackFail?.(endereco, e instanceof Error ? e.message : 'erro ao espelhar na TV');
+        if (temReservaRef.current) {
           setIndiceFonte((i) => i + 1);
           return;
         }
@@ -503,22 +526,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => {
       cancelado = true;
     };
-  }, [
-    tvConectada,
-    channel,
-    endereco,
-    nomeCanal,
-    tentativa,
-    temReserva,
-    onPlaybackOk,
-    onPlaybackFail,
-    onTvConectada
-  ]);
+  }, [tvConectada, channel, endereco, nomeCanal, tentativa]);
 
-  /** Carrega o canal. Refaz do zero quando o canal muda, troca fonte ou destrava. */
+  /** Carrega o canal. Refaz do zero apenas quando troca URL, modo ou recarrega. */
   useEffect(() => {
+    const canalAtual = channelRef.current;
     const video = videoRef.current;
-    if (!channel || !video) return;
+    if (!canalAtual || !video) return;
 
     if (tvConectada) {
       if (hlsRef.current) {
@@ -546,6 +560,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       hlsRef.current = null;
     }
 
+    const canalChave = canalAtual.id || canalAtual.name;
+    const canalNome = canalAtual.name;
+    const ehCamera = ehCanalDeCamera(canalAtual);
     const ehHls = endereco.includes('.m3u8') || endereco.includes('.m3u');
     const iniciadoEm = performance.now();
 
@@ -564,7 +581,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (!jaTocou && !desmontado && !falhouNestaCarga) {
         falha('tempo esgotado');
       }
-    }, indiceFonte === 0 ? 12000 : 9000);
+    }, indiceFonteRef.current === 0 ? 12000 : 9000);
 
     const sucesso = () => {
       if (desmontado || falhouNestaCarga) return;
@@ -580,16 +597,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (!jaTocou) {
         jaTocou = true;
         const latenciaMs = Math.round(performance.now() - iniciadoEm);
-        lembrarFonteBoa(channel.id || channel.name, endereco, latenciaMs);
+        lembrarFonteBoa(canalChave, endereco, latenciaMs);
         void tv.setPipPlaying(!pausadoPeloUsuarioRef.current);
-        onPlaybackOk?.(endereco);
+        callbacksRef.current.onPlaybackOk?.(endereco);
       }
     };
 
     const falha = (detalhe: string) => {
       if (desmontado || falhouNestaCarga) return;
       falhouNestaCarga = true;
-      console.warn('[player] FALHOU', JSON.stringify({ canal: channel.name, detalhe, temReserva, jaTocou }));
+      const temMais = temReservaRef.current;
+      console.warn('[player] FALHOU', JSON.stringify({ canal: canalNome, detalhe, temReserva: temMais, jaTocou }));
       window.clearTimeout(relogio);
       if (vigia !== undefined) window.clearInterval(vigia);
 
@@ -598,12 +616,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hlsRef.current = null;
       }
 
-      esquecerFonte(channel.id || channel.name, endereco);
+      esquecerFonte(canalChave, endereco);
       registrarDesempenhoFonte(endereco, false);
-      onPlaybackFail?.(endereco, detalhe);
+      callbacksRef.current.onPlaybackFail?.(endereco, detalhe);
       setTravandoAviso(false);
 
-      if (temReserva) {
+      if (temMais) {
         // Recria o elemento <video> para liberar camada MediaCodec cinza/travada
         setChaveVideo((k) => k + 1);
         setIndiceFonte((i) => i + 1);
@@ -613,14 +631,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.pause();
       video.removeAttribute('src');
       video.load();
-      onRefreshSources?.();
+      callbacksRef.current.onRefreshSources?.();
       setCarregando(false);
       setErro(
-        ehCanalDeCamera(channel)
+        ehCamera
           ? 'A câmera não está aparecendo agora.'
           : 'Este canal não está no ar agora.'
       );
-      onChannelExhausted?.();
+      callbacksRef.current.onChannelExhausted?.();
     };
 
     const aoProgredir = () => {
@@ -647,9 +665,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     video.addEventListener('ended', aoEncerrarStream);
     video.addEventListener('error', aoDarErroElemento);
 
-    // Vigia continuo (a cada 1s) para detectar tela cinza / travamento silencioso
-    // mesmo quando o HLS nao dispara erro fatal.
-    const limiteTravamentoMs = radio ? 14000 : 7500;
+    // Vigia continuo silencioso: tolera jitter normal de rede/buffering e so age
+    // quando a imagem realmente congelar sem avanco por tempo prolongado.
+    const limiteTravamentoMs = radio ? 25000 : 18000;
     vigia = window.setInterval(() => {
       if (desmontado || falhouNestaCarga) return;
       if (pausadoPeloUsuarioRef.current) {
@@ -669,7 +687,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (!jaTocou) return;
 
       const paradoMs = Date.now() - ultimoAvancoEm;
-      if (paradoMs >= 3500 && tentouDestravarEm === 0) {
+      if (paradoMs >= 9000 && tentouDestravarEm === 0) {
         tentouDestravarEm = Date.now();
         setTravandoAviso(true);
         const hls = hlsRef.current;
@@ -687,6 +705,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }, 1000);
 
     if (ehHls && Hls.isSupported()) {
+      const temMaisInicial = temReservaRef.current;
       const hls = new Hls({
         enableWorker: true,
         // Buffer moderado para aguentar oscilacao de Wi-Fi sem secar e travar em cinza
@@ -703,11 +722,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         startLevel: -1,
         maxBufferHole: 0.5,
         manifestLoadingTimeOut: 6000,
-        manifestLoadingMaxRetry: temReserva ? 0 : 2,
+        manifestLoadingMaxRetry: temMaisInicial ? 0 : 2,
         levelLoadingTimeOut: 6000,
-        levelLoadingMaxRetry: temReserva ? 0 : 2,
+        levelLoadingMaxRetry: temMaisInicial ? 0 : 2,
         fragLoadingTimeOut: 6500,
-        fragLoadingMaxRetry: temReserva ? 1 : 2,
+        fragLoadingMaxRetry: temMaisInicial ? 1 : 2,
         fragLoadingRetryDelay: 500
       });
 
@@ -761,7 +780,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (!dados.fatal) {
           if (
             dados.details === 'bufferStalledError' ||
-            dados.details === 'bufferNudgeOnStall' ||
             dados.details === 'fragLoadError' ||
             dados.details === 'fragLoadTimeOut' ||
             dados.details === 'levelLoadError' ||
@@ -770,12 +788,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             dados.details === 'manifestLoadTimeOut'
           ) {
             const agora = Date.now();
-            while (errosRecentes.length > 0 && agora - errosRecentes[0] > 9000) {
+            while (errosRecentes.length > 0 && agora - errosRecentes[0] > 15000) {
               errosRecentes.shift();
             }
             errosRecentes.push(agora);
 
-            if (errosRecentes.length >= 3 && agora - ultimoNudgeEm > 3500) {
+            if (errosRecentes.length >= 6 && agora - ultimoNudgeEm > 6000) {
               ultimoNudgeEm = agora;
               setTravandoAviso(true);
               try {
@@ -784,7 +802,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 /* se falhar, cai na escalada abaixo */
               }
             }
-            if (errosRecentes.length >= 5) {
+            if (errosRecentes.length >= 8) {
               falha('sinal instavel repetido: ' + dados.details);
             }
           }
@@ -798,7 +816,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           jaTocou
         }));
 
-        if (dados.type === Hls.ErrorTypes.NETWORK_ERROR && !recuperouRede && (!temReserva || jaTocou)) {
+        if (dados.type === Hls.ErrorTypes.NETWORK_ERROR && !recuperouRede && (!temReservaRef.current || jaTocou)) {
           recuperouRede = true;
           setTravandoAviso(true);
           hls.startLoad(-1);
@@ -837,8 +855,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeAttribute('src');
       video.load();
     };
-    // Depende do ENDERECO e da chaveVideo, nao do objeto `channel`.
-  }, [endereco, temReserva, tentativa, chaveVideo, radio, tvConectada, onPlaybackOk, onPlaybackFail, onRefreshSources, onChannelExhausted]);
+  }, [endereco, tentativa, chaveVideo, radio, tvConectada]);
   // indiceFonte fica de fora de proposito: ele so muda junto com o endereco
 
   /**
@@ -959,15 +976,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const video = videoRef.current;
       if (!video) return;
 
-      const hls = hlsRef.current;
-      if (hls) {
-        try {
-          hls.startLoad(-1);
-        } catch {
-          /* recarrega abaixo se necessario */
+      // Se ja estiver tocando e carregado, nao interrompe o stream
+      const precisaKick = video.paused || video.readyState < 2;
+      if (precisaKick) {
+        const hls = hlsRef.current;
+        if (hls) {
+          try {
+            hls.startLoad(-1);
+          } catch {
+            /* recarrega abaixo se necessario */
+          }
         }
-      }
-      if (video.paused) {
         video.play().catch(() => undefined);
       }
       setTocando(true);
@@ -983,7 +1002,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (congelado) {
           tentarDeNovo();
         }
-      }, 1800);
+      }, 2200);
     };
 
     const onVisibilidade = () => {
